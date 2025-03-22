@@ -1,0 +1,27 @@
+{
+  "name": "mcp-repair-tool",
+  "version": "1.0.0",
+  "description": "A tool to repair MCP server generator",
+  "main": "build/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node build/index.js"
+  },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "repair",
+    "typescript"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "0.6.0",
+    "glob": "^10.3.10"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}

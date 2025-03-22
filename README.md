@@ -1,0 +1,55 @@
+# MCP Generator
+
+This project is a tool for generating Model Context Protocol (MCP) components.
+
+## Installation
+
+To install the MCP Generator, run:
+
+```bash
+npm install
+```
+
+## Usage
+
+Test MPC server in Terminal:
+
+```bash
+bun start -- broken mcp serve vague name
+npm start -- broken mcp serve vague name
+```
+
+To use the MCP Generator, run:
+
+```bash
+npm run build
+```
+
+This will generate the MCP components in the `build` directory.
+
+## Contributing
+
+To contribute to the MCP Generator, please follow these steps:
+
+1.  Fork the repository.
+2.  Create a new branch.
+3.  Make your changes.
+4.  Submit a pull request.
+
+### WHere is the MCP bin folder on Windows?
+If bin javascript code for a MPC Server in index.js
+```javascript
+#!/usr/bin/env node
+```
+Main bin folder for modelcontextprotocol
+```
+C:\Users\USERNAME\AppData\Roaming\npm\node_modules\@modelcontextprotocol
+```
+Ex: fileserver become server-fileserver
+```
+C:\Users\USERNAME\AppData\Roaming\npm\node_modules\@modelcontextprotocol\server-fileserver
+```
+Usually the index.js file will be:
+```
+C:\Users\USERNAME\AppData\Roaming\npm\node_modules\@modelcontextprotocol\server-fileserver\dist\index.js
+```
