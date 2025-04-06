@@ -1,31 +1,24 @@
-# Dependencies and package managers
+# Exclude everything by default
+*
+
+# Then whitelist only what we want to track
+!src/
+!src/**/*.ts
+!package.json
+!tsconfig.json
+!README.md
+!.gitignore
+
+# Always ignore these, even if they're in a whitelisted directory
 node_modules/
-bun.lockb
-package-lock.json
-
-# Build and output directories
-build/
-dist/
-
-# Development and local directories
 .vscode/
 .roo/
 .clinerules/
-clinerules/
+build/
+dist/
 docs-infos/
 imgs/
-
-# Logs and debugging
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# OS generated files
-.DS_Store
-Thumbs.db
-
-# Copy files (backup/temporary files)
 *copy*
-*copy.*
-**/*copy*/
+*.log
+bun.lockb
+package-lock.json
