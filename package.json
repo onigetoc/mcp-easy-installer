@@ -1,7 +1,7 @@
 {
   "name": "mcp-install-repair-tool",
   "version": "1.0.0",
-  "description": "A tool to repair MCP server generator",
+  "description": "A tool to install & repair MCP servers",
   "main": "build/index.js",
   "type": "module",
   "scripts": {

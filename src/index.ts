@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// test: https://github.com/overstarry/qweather-mcp
+// test with env: https://github.com/overstarry/qweather-mcp
 // npm start install https://github.com/overstarry/qweather-mcp
 // npm start install https://github.com/Garoth/echo-mcp
 // python
