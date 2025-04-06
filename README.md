@@ -25,6 +25,35 @@ To use the MCP Generator, run:
 npm run build
 ```
 
+```json
+"mcp-install-repair-tool": {
+    "command": "node",
+    "args": [
+    "C:\\Users\\LENOVO\\APPS\\0-MCP\\mcp-fix-installer\\build\\index.js"
+    ],
+    "env": {
+    "GITHUB_TOKEN": "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"
+    },
+    "enabled": false,
+    "disabled": true
+}
+```
+
+## Installation Flow
+
+```mermaid
+graph TD
+    A[Parse User Input] --> B{URL Type?}
+    B -->|GitHub shorthand| C[Construct full URL]
+    B -->|Full URL| D[Clone Repository]
+    C --> D
+    D --> E[Install Dependencies]
+    E --> F[Build Project]
+    F --> G[Locate index.js]
+    G --> H[Generate MCP Config]
+    H --> I[Update Settings]
+```
+
 This will generate the MCP components in the `build` directory.
 
 ## Contributing
