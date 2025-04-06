@@ -1,18 +1,21 @@
-# Dependencies
+# Dependencies and package managers
 node_modules/
+bun.lockb
+package-lock.json
 
-# Build output
+# Build and output directories
 build/
+dist/
+
+# Development and local directories
+.vscode/
+.roo/
+.clinerules/
 clinerules/
 docs-infos/
 imgs/
 
-
-# Editor/Tool specific
-.vscode/
-.roo/
-
-# Logs
+# Logs and debugging
 *.log
 npm-debug.log*
 yarn-debug.log*
@@ -22,11 +25,7 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 
-# Markdown files (allow README.md)
-*.md
-!README.md
-
-# Exclude files and folders containing 'copy'
-# (Keeping these as they seem specific to your workflow)
+# Copy files (backup/temporary files)
+*copy*
+*copy.*
 **/*copy*/
-**/*copy*.*
