@@ -1,0 +1,28 @@
+# Exclude everything
+/*
+
+# Allow specific files and folders
+!README.md
+!*/
+
+# Exclude all .md files except README.md
+*.md
+
+# Exclude some specific folders
+!/.github
+!/.vscode
+!/.gitignore
+!/.git
+!/.gitmodules
+docs-infos/
+build/
+imgs/
+.vscode/
+.roo/
+
+node_modules/
+clinerules/
+
+# Exclude files and folders containing 'copy'
+**/*copy*/
+**/*copy*.*

@@ -1,22 +1,36 @@
 #!/usr/bin/env node
 
+// test: https://github.com/overstarry/qweather-mcp
+// npm start install https://github.com/overstarry/qweather-mcp
+// npm start install https://github.com/Garoth/echo-mcp
+// python
+// npm start install https://github.com/Garoth/echo-mcp
+
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   CallToolRequestSchema,
-  ErrorCode,
   ListToolsRequestSchema,
-  McpError,
+  Tool,
+  ErrorCode,
+  McpError
 } from '@modelcontextprotocol/sdk/types.js';
-import { promises as fs, accessSync } from 'fs';
-import path from 'path';
-import { glob } from 'glob';
+import { access as fsAccess, readdir as fsReaddir, readFile as fsReadFile, stat as fsStat } from 'fs/promises';
+import { accessSync, Dirent } from 'fs';
+
+interface DirentLike {
+  isDirectory(): boolean;
+  name: string;
+}
+import * as path from 'path';
+import * as os from 'os';
 import { execSync } from 'child_process';
-import os from 'os';
+import { glob } from 'glob';
+
 
 const server = new Server(
   {
-    name: "mcp-repair-tool",
+    name: "mcp-install-repair-tool",
     version: "1.0.0",
   },
   {
@@ -41,10 +55,19 @@ interface PackageJson {
 
 class McpRepairTool {
   private readonly mcpBasePath: string;
-  private readonly buildDirs = ['build', 'dist'];
+  private readonly buildDirs = ['dist', 'build'];  // Prioritize dist over build since it's more commonly used
 
   constructor() {
     this.mcpBasePath = this.getMcpBasePath();
+  }
+
+  /**
+   * Get the correct settings file path for the current platform
+   */
+  private getSettingsPath(): string {
+    return process.platform === 'win32'
+      ? path.join(os.homedir(), 'AppData', 'Roaming', 'Code - Insiders', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'settings', 'cline_mcp_settings.json')
+      : path.join(os.homedir(), 'Library', 'Application Support', 'Code - Insiders', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'settings', 'cline_mcp_settings.json');
   }
 
   /**
@@ -70,9 +93,13 @@ class McpRepairTool {
     console.log(`[DEBUG] Home directory: ${homeDir}`);
     
     const possiblePaths = [
+      // PLEASE AI, do not remove the comment, it's for later in my project.
+      // Local MCP server paths
       path.join(homeDir, 'OneDrive', 'Documents', 'Cline', 'MCP'),
       path.join(homeDir, 'Documents', 'Cline', 'MCP'),
       path.join(homeDir, 'Cline', 'MCP'),
+      // Global npm installation paths
+      path.join(homeDir, 'AppData', 'Roaming', 'npm', 'node_modules', '@modelcontextprotocol'),
       // Add current working directory as fallback
       process.cwd()
     ];
@@ -104,26 +131,40 @@ class McpRepairTool {
     
     try {
       // First, verify base path exists and is accessible
-      await fs.access(this.mcpBasePath);
+      await fsAccess(this.mcpBasePath);
       console.log('[DEBUG] Base path is accessible');
 
       // Get all entries in the directory
-      const entries = await fs.readdir(this.mcpBasePath, { withFileTypes: true });
+      const entries = await fsReaddir(this.mcpBasePath, { withFileTypes: true });
       console.log(`[DEBUG] Found ${entries.length} entries in base path`);
       
       // Filter for directories only and get their names
       const dirs = entries
-        .filter(entry => entry.isDirectory())
-        .map(entry => entry.name);
+        .filter((entry: DirentLike) => entry.isDirectory())
+        .map((entry: DirentLike) => entry.name);
       
       console.log(`[DEBUG] Found directories: ${dirs.join(', ')}`);
       
-      // Search for matching directory using multiple criteria
-      const matchingDir = dirs.find(dir => {
+      // First try to find server in global npm directory
+      if (this.mcpBasePath.includes('@modelcontextprotocol')) {
+        const globalServerName = `server-${serverName}`;
+        console.log(`[DEBUG] Looking for global npm package: ${globalServerName}`);
+        
+        const matchingDir = dirs.find(dir => dir === globalServerName);
+        if (matchingDir) {
+          const fullPath = path.join(this.mcpBasePath, matchingDir);
+          console.log(`[DEBUG] Found matching global npm package: ${fullPath}`);
+          return fullPath;
+        }
+      }
+      
+      // If not found in global npm, try local directories
+      console.log('[DEBUG] Searching local directories');
+      const matchingDir = dirs.find((dir: string) => {
         const dirLower = dir.toLowerCase();
         const searchLower = serverName.toLowerCase();
         
-        // Try different matching strategies
+        // Try different matching strategies for local directories
         return (
           dirLower.includes(searchLower) ||              // Partial match
           dirLower === searchLower ||                    // Exact match
@@ -139,14 +180,14 @@ class McpRepairTool {
         
         // Additional verification
         try {
-          const stats = await fs.stat(fullPath);
+          const stats = await fsStat(fullPath);
           if (!stats.isDirectory()) {
             console.log('[DEBUG] Matched path is not a directory');
             return null;
           }
           
           // Check if it has package.json to verify it's likely an MCP server
-          const hasPackageJson = await fs.access(path.join(fullPath, 'package.json'))
+          const hasPackageJson = await fsAccess(path.join(fullPath, 'package.json'))
             .then(() => true)
             .catch(() => false);
             
@@ -217,15 +258,48 @@ class McpRepairTool {
   async findJsFile(directory: string): Promise<string | null> {
     try {
       console.log('[Step 5] Looking for compiled JavaScript files...');
+      console.log('[DEBUG] Searching locations in priority order:');
+      console.log('[DEBUG] 1. package.json bin field');
+      console.log('[DEBUG] 2. package.json main field');
+      console.log('[DEBUG] 3. package.json start script');
+      console.log('[DEBUG] 4. dist/build directories');
+      console.log('[DEBUG] 5. root directory index.js');
+      console.log('[DEBUG] 6. src directory index.js');
 
       // 1. First check package.json paths
       const packageJson = await this.verifyPackageJson(directory);
       if (packageJson) {
+        // First check bin field - highest priority for MCP servers
+        if (packageJson.bin) {
+          let binPath: string | null = null;
+          if (typeof packageJson.bin === 'string') {
+            binPath = packageJson.bin;
+          } else if (typeof packageJson.bin === 'object') {
+            // For object format, take first path or matching server name
+            const binEntries = Object.entries(packageJson.bin);
+            const matchingEntry = binEntries.find(([key]) => 
+              key === packageJson.name || key.endsWith('-server')
+            );
+            binPath = matchingEntry ? matchingEntry[1] : binEntries[0]?.[1];
+          }
+          
+          if (binPath) {
+            const fullBinPath = path.join(directory, binPath);
+            try {
+              await fsAccess(fullBinPath);
+              console.log(`  Found index file in bin: ${fullBinPath}`);
+              return fullBinPath;
+            } catch {
+              console.log('  Bin path not accessible:', fullBinPath);
+            }
+          }
+        }
+
         // Check "main" field
         if (packageJson.main) {
           const mainPath = path.join(directory, packageJson.main);
           try {
-            await fs.access(mainPath);
+              await fsAccess(mainPath);
             console.log(`  Found index file in package.json main: ${mainPath}`);
             return mainPath;
           } catch {
@@ -240,7 +314,7 @@ class McpRepairTool {
           if (match) {
             const scriptPath = path.join(directory, match[1]);
             try {
-              await fs.access(scriptPath);
+              await fsAccess(scriptPath);
               console.log(`  Found index file in start script: ${scriptPath}`);
               return scriptPath;
             } catch {
@@ -248,39 +322,15 @@ class McpRepairTool {
             }
           }
         }
-
-        // Check "bin" field
-        if (packageJson.bin) {
-          let binPath: string | null = null;
-          if (typeof packageJson.bin === 'string') {
-            binPath = packageJson.bin;
-          } else if (typeof packageJson.bin === 'object') {
-            // Take the first entry in the bin object
-            const firstBinPath = Object.values(packageJson.bin)[0];
-            if (typeof firstBinPath === 'string') {
-              binPath = firstBinPath;
-            }
-          }
-          
-          if (binPath) {
-            const fullBinPath = path.join(directory, binPath);
-            try {
-              await fs.access(fullBinPath);
-              console.log(`  Found index file in bin: ${fullBinPath}`);
-              return fullBinPath;
-            } catch {
-              console.log('  Bin path not accessible:', fullBinPath);
-            }
-          }
-        }
       }
 
       // 2. Fall back to checking build/dist directories
+      console.log('[DEBUG] Checking build directories in priority order:', this.buildDirs.join(', '));
       for (const buildDir of this.buildDirs) {
-        console.log(`  Checking ${buildDir} directory...`);
+        console.log(`[DEBUG] Searching in ${buildDir} directory...`);
         const buildPath = path.join(directory, buildDir);
         try {
-          await fs.access(buildPath);
+          await fsAccess(buildPath);
           const files = await glob('**/index.js', {
             cwd: buildPath,
             ignore: ['node_modules/**']
@@ -296,7 +346,7 @@ class McpRepairTool {
         }
       }
 
-      // 2. Check root directory for JS files only
+      // 3. Check root directory
       console.log('  Checking root directory...');
       const rootFiles = await glob('index.js', {
         cwd: directory,
@@ -308,11 +358,11 @@ class McpRepairTool {
         return foundFile;
       }
 
-      // 3. Check src directory as last resort
+      // 4. Check src directory as last resort
       console.log('  Checking src directory...');
       const srcPath = path.join(directory, 'src');
       try {
-        await fs.access(srcPath);
+        await fsAccess(srcPath);
         const srcFiles = await glob('index.js', {
           cwd: srcPath,
           ignore: ['node_modules/**']
@@ -345,14 +395,14 @@ class McpRepairTool {
       
       // Vérifier si le fichier existe
       try {
-        await fs.access(packageJsonPath);
+        await fsAccess(packageJsonPath);
         console.log('  package.json file found');
       } catch {
         console.log('  package.json file not found');
         return null;
       }
 
-      const packageJsonContent = await fs.readFile(packageJsonPath, 'utf8');
+      const packageJsonContent = await fsReadFile(packageJsonPath, 'utf8');
       const packageJson = JSON.parse(packageJsonContent);
       console.log('  Successfully parsed package.json');
       return packageJson;
@@ -363,41 +413,430 @@ class McpRepairTool {
   }
 
   /**
-   * Check if node_modules exists
+   * Generate MCP configuration, optionally merging environment variables.
    */
-  async checkNodeModules(serverPath: string): Promise<boolean> {
-    console.log('[Step 4] Checking node_modules...');
-    try {
-      const nodeModulesPath = path.join(serverPath, 'node_modules');
-      await fs.access(nodeModulesPath);
-      console.log('  node_modules directory found');
-      return true;
-    } catch {
-      console.log('  node_modules directory not found');
-      return false;
-    }
-  }
-
-  /**
-   * Generate MCP configuration
-   */
-  generateMcpConfig(jsFilePath: string, serverName: string): string {
-    console.log('[Step 5] Generating MCP configuration...');
-    const formattedPath = process.platform === 'win32' 
-      ? jsFilePath.replace(/\//g, '\\')
+  generateMcpConfig(jsFilePath: string, serverName: string, env?: { [key: string]: string } | null): string {
+    console.log(`[DEBUG] Generating MCP config for ${serverName}`);
+    // Format Windows paths with exactly two backslashes
+    const formattedPath = process.platform === 'win32'
+      ? jsFilePath.replace(/\\/g, '\\\\') // Ensure exactly two backslashes
       : jsFilePath;
-    
-    // Format JSON properly with trailing commas
-    const config = {
-      [serverName]: {
+
+    const serverConfig: any = {
         command: "node",
         args: [formattedPath],
         enabled: true,
         disabled: false,
         autoApprove: [],
-      },
     };
-    return JSON.stringify(config, null, 2);
+
+    if (env && typeof env === 'object' && Object.keys(env).length > 0) {
+        console.log('[DEBUG] Found environment variables in README:');
+        Object.entries(env).forEach(([key, value]) => {
+            console.log(`[DEBUG]   ${key} = ${value}`);
+        });
+        serverConfig.env = env;
+    } else {
+        console.log('[DEBUG] ⚠️ No environment variables found in README!');
+        console.log('[DEBUG] This may cause issues if the MCP server requires environment variables.');
+    }
+
+    const config = {
+      [serverName]: serverConfig,
+    };
+
+    // Custom JSON stringifier to prevent additional escaping
+    const jsonString = JSON.stringify(config, null, 2)
+      .replace(/\\\\\\\\/g, '\\\\'); // Convert any quadruple backslashes to double
+
+    console.log(`[DEBUG] Generated config:\n${jsonString}`);
+    return jsonString;
+  }
+
+  /**
+   * Extracts the first valid 'env' object from JSON code blocks within Markdown content.
+   * It looks for nested structures like { "serverName": { "env": {...} } } or
+   * { "mcpServers": { "serverName": { "env": {...} } } }.
+   */
+  private extractEnvFromReadme(readmeContent: string): { [key: string]: string } | null {
+    console.log('[DEBUG] ===== STARTING ENV VARIABLE EXTRACTION =====');
+    console.log('[DEBUG] README content length:', readmeContent.length);
+    
+    if (!readmeContent) {
+        console.log('[DEBUG] README content is empty!');
+        return null;
+    }
+
+    // Log first part of content for verification
+    console.log('[DEBUG] README content preview:');
+    console.log(readmeContent.substring(0, 200));
+
+    const envVars: { [key: string]: string } = {};
+
+    // Find all environment variables in the format KEY=value or KEY=<placeholder>
+    console.log('[DEBUG] Looking for KEY=value pairs...');
+    const envLines = readmeContent.match(/^[A-Z_]+=(?:<[^>]+>|[^\s]+)/gm) || [];
+    if (envLines.length > 0) {
+        console.log('[DEBUG] Found', envLines.length, 'potential env variables in KEY=value format');
+        for (const line of envLines) {
+            const [key, value] = line.split('=');
+            if (key && value) {
+                envVars[key] = value;
+                console.log(`[DEBUG] ✓ Found env variable: ${key} = ${value}`);
+            }
+        }
+    } else {
+        console.log('[DEBUG] No KEY=value pairs found');
+    }
+
+    // Also look for env object in any code block (JSON or not)
+    console.log('[DEBUG] Looking for code blocks with env objects...');
+    const codeBlockRegex = /```(?:json)?\s*{[\s\S]*?"env":\s*{([^}]*)}/g;
+    let match;
+    let codeBlockCount = 0;
+    while ((match = codeBlockRegex.exec(readmeContent)) !== null) {
+        codeBlockCount++;
+        console.log(`[DEBUG] Found code block #${codeBlockCount} containing env object`);
+        const envBlock = match[1];
+        console.log('[DEBUG] Env block content:', envBlock);
+        
+        // Extract key-value pairs, allowing any format
+        const kvPairs = envBlock.match(/"([^"]+)":\s*(?:"([^"]+)"|<[^>]+>)/g) || [];
+        console.log('[DEBUG] Found', kvPairs.length, 'potential key-value pairs');
+        
+        for (const pair of kvPairs) {
+            const [key, value] = pair.split(':').map(s => s.trim().replace(/"/g, ''));
+            if (key && value) {
+                envVars[key] = value;
+                console.log(`[DEBUG] ✓ Found env variable in code block: ${key} = ${value}`);
+            }
+        }
+    }
+
+    if (codeBlockCount === 0) {
+        console.log('[DEBUG] No code blocks with env objects found');
+    }
+
+    const foundVars = Object.keys(envVars);
+    if (foundVars.length > 0) {
+        console.log('[DEBUG] ===== EXTRACTION COMPLETE =====');
+        console.log('[DEBUG] Total environment variables found:', foundVars.length);
+        console.log('[DEBUG] Variables:', foundVars.join(', '));
+        return envVars;
+    } else {
+        console.log('[DEBUG] ===== EXTRACTION COMPLETE =====');
+        console.log('[DEBUG] No environment variables found in README');
+        return null;
+    }
+  }
+
+  /** Helper function to check if an object contains a valid 'env' property */
+  private findValidEnvObject(obj: any): { [key: string]: string } | null {
+      if (!obj || typeof obj !== 'object') return null;
+      
+      const envVars: { [key: string]: string } = {};
+
+      // If there's an env object directly, extract its values
+      if (obj.env && typeof obj.env === 'object') {
+          Object.entries(obj.env).forEach(([key, value]) => {
+              if (typeof value === 'string') {
+                  envVars[key] = value;
+              }
+          });
+      }
+
+      // Look for any key that looks like an environment variable
+      Object.entries(obj).forEach(([key, value]) => {
+          if (typeof value === 'string' && /^[A-Z][A-Z0-9_]*$/.test(key)) {
+              envVars[key] = value;
+          }
+      });
+
+      return Object.keys(envVars).length > 0 ? envVars : null;
+  }
+
+
+  /**
+   * Parse GitHub URL or shorthand to get clone URL and repo name
+   */
+  private parseGithubUrl(repoInput: string): { cloneUrl: string; repoName: string } {
+    console.log(`[DEBUG] Parsing GitHub input: ${repoInput}`);
+    let cloneUrl = '';
+    let repoName = '';
+
+    // Regex to match GitHub URLs (HTTPS and SSH) and shorthand
+    const githubUrlRegex = /^(?:https:\/\/github\.com\/|git@github\.com:)([^\/]+\/[^\.\/]+)(?:\.git)?$/;
+    const shorthandRegex = /^([^\/]+\/[^\.\/]+)$/;
+
+    const urlMatch = repoInput.match(githubUrlRegex);
+    const shorthandMatch = repoInput.match(shorthandRegex);
+
+    if (urlMatch) {
+      repoName = urlMatch[1];
+      cloneUrl = `https://github.com/${repoName}.git`;
+      console.log(`[DEBUG] Matched full URL. Repo: ${repoName}, Clone URL: ${cloneUrl}`);
+    } else if (shorthandMatch) {
+      repoName = shorthandMatch[1];
+      cloneUrl = `https://github.com/${repoName}.git`;
+      console.log(`[DEBUG] Matched shorthand. Repo: ${repoName}, Clone URL: ${cloneUrl}`);
+    } else {
+      console.error('[DEBUG] Invalid GitHub URL or shorthand format');
+      throw new Error('Invalid GitHub URL or shorthand format. Use format like `owner/repo` or `https://github.com/owner/repo`.');
+    }
+
+    // Extract the final part of the repo name for the directory
+    const repoNameParts = repoName.split('/');
+    const dirName = repoNameParts[repoNameParts.length - 1];
+
+    return { cloneUrl, repoName: dirName };
+  }
+
+  /**
+   * Clone a Git repository
+   */
+  private async cloneRepository(cloneUrl: string, targetDir: string): Promise<void> {
+    console.log(`[DEBUG] Cloning repository ${cloneUrl} into ${targetDir}`);
+    try {
+      // Create base directory if needed
+      const baseDir = path.dirname(targetDir);
+      await import('fs/promises').then(fs => fs.mkdir(baseDir, { recursive: true }));
+
+      // Check if directory exists and attempt cleanup if needed
+      try {
+        const exists = await import('fs/promises')
+          .then(fs => fs.access(targetDir)
+          .then(() => true)
+          .catch(() => false));
+        
+        if (exists) {
+          console.log('[DEBUG] Found existing installation directory');
+          
+          try {
+            // Check if it's a valid installation or corrupted
+            const hasPackageJson = await import('fs/promises')
+              .then(fs => fs.access(path.join(targetDir, 'package.json'))
+              .then(() => true)
+              .catch(() => false));
+
+            if (hasPackageJson) {
+              throw new Error(
+                `Installation directory already exists and appears to be a valid installation: ${targetDir}\n` +
+                `To reinstall, first remove the existing directory manually.`
+              );
+            } else {
+              console.log('[DEBUG] Existing directory appears to be incomplete/corrupted, cleaning up...');
+              await import('fs/promises').then(fs => fs.rm(targetDir, { recursive: true, force: true }));
+              console.log('[DEBUG] Cleanup successful');
+            }
+          } catch (error: any) {
+            if (error?.message?.includes('already exists')) {
+              throw error; // Rethrow our custom error
+            }
+            // Other errors during cleanup - warn but continue
+            console.warn('[DEBUG] Warning during cleanup:', error?.message || String(error));
+          }
+        }
+      } catch (error: any) {
+        if (error?.code !== 'ENOENT' && !error?.message?.includes('already exists')) {
+          throw error; // Rethrow unexpected errors
+        }
+        // ENOENT is fine - directory doesn't exist
+      }
+
+      // Clone repository with retry
+      const maxRetries = 3;
+      let retryCount = 0;
+      let lastError;
+
+      // Single attempt at cloning - we've already checked directory doesn't exist
+      const command = `git clone ${cloneUrl} "${targetDir.replace(/\\/g, '\\\\')}"`;
+      console.log(`[DEBUG] Executing git clone: ${command}`);
+      
+      try {
+        execSync(command, { stdio: 'pipe' });
+        console.log('[DEBUG] Git clone successful');
+      } catch (error: any) {
+        const errorMessage = error?.message || String(error);
+        console.error('[DEBUG] Git clone failed:', errorMessage);
+        
+        // Provide more helpful error messages
+        if (errorMessage.includes('already exists')) {
+          throw new Error(
+            `Cannot clone - directory already exists: ${targetDir}\n` +
+            `Please remove it manually if you want to reinstall this server.`
+          );
+        } else {
+          throw new Error(`Failed to clone repository: ${errorMessage}`);
+        }
+      }
+      
+    } catch (error) {
+      console.error('[DEBUG] Error during git clone:', error);
+      throw new Error(`Failed to clone repository: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * Install dependencies using npm
+   */
+  private async installDependencies(directory: string): Promise<void> {
+    console.log(`[DEBUG] Installing dependencies in ${directory}`);
+    try {
+      console.log('[DEBUG] Executing: npm install');
+      execSync('npm install', { cwd: directory, stdio: 'pipe' });
+      console.log('[DEBUG] npm install successful');
+    } catch (error) {
+      console.error('[DEBUG] Error during npm install:', error);
+      throw new Error(`Failed to install dependencies: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * Build the project using npm build script
+   */
+  private async buildProject(directory: string, packageJson: PackageJson | null): Promise<void> {
+    console.log(`[DEBUG] Building project in ${directory}`);
+    if (packageJson?.scripts?.build) {
+      console.log('[DEBUG] Found build script, executing: npm run build');
+      try {
+        execSync('npm run build', { cwd: directory, stdio: 'pipe' });
+        console.log('[DEBUG] npm run build successful');
+      } catch (error) {
+        console.error('[DEBUG] Error during npm run build:', error);
+        // Don't throw an error here, finding the JS file later will fail if build was necessary
+        console.warn(`Build script failed: ${error instanceof Error ? error.message : String(error)}. Proceeding to find JS file anyway.`);
+      }
+    } else {
+      console.log('[DEBUG] No build script found in package.json, skipping build step.');
+    }
+  }
+
+  /**
+   * Main install function
+   */
+  /**
+   * Reads the README.md file (case-insensitive) from a local directory.
+   */
+  private async readLocalReadme(directory: string): Promise<string> {
+    console.log('\n[DEBUG] ===== READING LOCAL README =====');
+    console.log(`[DEBUG] Searching in directory: ${directory}`);
+    const readmeNames = ['README.md', 'readme.md', 'Readme.md'];
+    
+    for (const readmeName of readmeNames) {
+      const readmePath = path.join(directory, readmeName);
+      try {
+        await fsAccess(readmePath); // Check if file exists
+        console.log(`[DEBUG] Found README file: ${readmePath}`);
+        const content = await fsReadFile(readmePath, 'utf8');
+        console.log(`[DEBUG] Successfully read ${readmeName} (${content.length} characters)`);
+        
+        // Log preview
+        console.log('[DEBUG] README Preview:\n', content.substring(0, 200) + '...');
+        return content;
+      } catch (error) {
+        // If fsAccess fails or fsReadFile fails, it means the file doesn't exist or isn't readable
+        console.log(`[DEBUG] ${readmeName} not found or not readable in ${directory}`);
+      }
+    }
+
+    console.log('[DEBUG] No README file found in the directory.');
+    return ''; // Return empty string if no README is found
+  }
+
+
+  async install(repoUrl: string): Promise<string> {
+    console.log(`Starting installation process for repository: ${repoUrl}`);
+    let readmeEnv: { [key: string]: string } | null = null;
+
+    // Helper function for delays between steps
+    const stepDelay = async () => new Promise(resolve => setTimeout(resolve, 500));
+
+    console.log('\n[Step 1] Parsing repository URL...');
+    const { cloneUrl, repoName } = this.parseGithubUrl(repoUrl);
+    const installDir = path.join(this.mcpBasePath, repoName);
+    console.log(`  Success: Repo Name: ${repoName}, Install Dir: ${installDir}`);
+    
+    await stepDelay();
+
+    // Extract owner/repo from clone URL
+    const urlMatch = cloneUrl.match(/github\.com[/:]([\w-]+)\/([\w-]+)(?:\.git)?$/);
+    if (!urlMatch) {
+      throw new Error('Could not parse owner/repo from GitHub URL');
+    }
+    const [, owner, repo] = urlMatch;
+
+
+    console.log('\n[Step 2] Cloning repository...');
+    try {
+      await this.cloneRepository(cloneUrl, installDir);
+      await stepDelay();
+    } catch (error) {
+      console.error('[DEBUG] Clone failed:', error);
+      throw error;
+    }
+    console.log('  Success: Repository cloned');
+
+    console.log('\n[Step 3] Verifying package.json...');
+    const packageJson = await this.verifyPackageJson(installDir);
+    if (!packageJson) {
+      console.log('  Error: package.json validation failed');
+      // Allow installation to continue, maybe it's not a Node.js project or doesn't need build/deps
+      console.warn('  Warning: No valid package.json found. Installation might be incomplete if dependencies or build steps are required.');
+    } else {
+      console.log('  Success: package.json is valid');
+    }
+
+    console.log('\n[Step 4] Installing dependencies...');
+    if (packageJson) { // Only run npm install if package.json exists
+      await this.installDependencies(installDir);
+      console.log('  Success: Dependencies installed');
+    } else {
+      console.log('  Skipping dependency installation (no package.json)');
+    }
+
+    console.log('\n[Step 5] Building project...');
+    await this.buildProject(installDir, packageJson);
+    // Build success/failure handled within the function
+
+    console.log('\n[Step 6] Locating compiled JavaScript file...');
+    const jsFile = await this.findJsFile(installDir);
+    if (!jsFile) {
+      console.log('  Error: Could not find compiled JavaScript file (e.g., index.js)');
+      throw new Error('Could not find the main JavaScript file after installation and build. Check the repository structure and build output.');
+    }
+    console.log('  Success: Found compiled JavaScript at:', jsFile);
+
+    // Config generation moved after reading local README
+
+    // Read local README *before* generating the final message and config
+    console.log('\n[Step 6] Reading local README.md for environment variables...');
+    try {
+      const localReadmeContent = await this.readLocalReadme(installDir);
+      if (localReadmeContent) {
+        console.log('  Success: Read local README.md');
+        readmeEnv = this.extractEnvFromReadme(localReadmeContent); // Update readmeEnv based on local file
+        if (readmeEnv) {
+          console.log('  Found environment variables in local README:', Object.keys(readmeEnv).join(', '));
+        } else {
+          console.log('  No environment variables found in local README');
+        }
+      } else {
+        console.log('  No local README.md found.');
+      }
+    } catch (error) {
+      console.warn('  Warning: Error reading local README.md:', error instanceof Error ? error.message : String(error));
+    }
+
+    console.log('\n[Step 7] Generating MCP configuration...'); // Renumbered step
+    const mcpConfig = this.generateMcpConfig(jsFile, repoName, readmeEnv); // Use potentially updated readmeEnv
+    console.log('  Success: Server configuration created');
+
+    const settingsPath = this.getSettingsPath();
+    const envMessage = readmeEnv // Now use the final readmeEnv value
+      ? `\n\nFound environment variables: ${Object.keys(readmeEnv).join(', ')}\nThese have been added to your configuration.`
+      : '\n\nNo environment variables were found in the README. You may need to configure them manually.';
+
+    return `Server '${repoName}' installed successfully from ${repoUrl}.${envMessage}\n\nAdd this configuration to your settings file (${settingsPath}):\n\n${mcpConfig}`;
   }
 
   /**
@@ -407,83 +846,105 @@ class McpRepairTool {
     console.log(`Starting repair process for server: ${serverName}`);
 
     console.log('\n[Step 1] Finding server directory...');
-    // Find the server directory
     const serverDir = await this.findMcpServerDirectory(serverName);
     if (!serverDir) {
-      console.log('  Error: Server directory not found');
-      throw new Error(`Could not find a directory matching '${serverName}'`);
+      // Check if this looks like a GitHub URL or username/repo format
+      const githubRegex = /^(?:https:\/\/github\.com\/|git@github\.com:)?([^\/]+\/[^\.\/]+)(?:\.git)?$/;
+      if (githubRegex.test(serverName)) {
+        console.log('  Note: Input looks like a GitHub repository reference');
+        throw new Error(
+          `Could not find a directory matching '${serverName}'\n` +
+          `If you're trying to install a new server from GitHub, use the install command instead:\n` +
+          `install_mcp_server with repo_url: "${serverName}"`
+        );
+      }
+      throw new Error(`Could not find a directory matching '${serverName}'. Check the server name and try again.`);
     }
-    console.log('  Success: Server directory found');
+    console.log('  Success: Server directory found at:', serverDir);
 
-    // Check for source file first
+    // Look for source files
     console.log('\n[Step 2] Looking for source files...');
     const sourceFile = await this.findSourceFile(serverDir);
-    if (!sourceFile) {
-      console.log('  Error: No TypeScript source file found');
-      throw new Error('Could not find any TypeScript source files. This appears to be an empty or invalid project.');
+    let mainJsFile = await this.findJsFile(serverDir);
+    
+    if (!sourceFile && !mainJsFile) {
+      console.log('  Error: No source files found');
+      throw new Error('Could not find any TypeScript or JavaScript source files.');
     }
-    console.log('  Success: Found source file at', sourceFile);
 
-    console.log('\n[Step 3] Checking package.json...');
-    // Verify package.json
+    if (sourceFile) {
+      console.log('  Success: Found TypeScript source at:', sourceFile);
+    }
+    if (mainJsFile) {
+      console.log('  Success: Found JavaScript source at:', mainJsFile);
+    }
+
+    console.log('\n[Step 3] Verifying package.json...');
     const packageJson = await this.verifyPackageJson(serverDir);
     if (!packageJson) {
-      console.log('  Error: package.json validation failed');
-      throw new Error('No valid package.json found');
+      console.log('  Warning: No valid package.json found');
+      if (mainJsFile) {
+        // If we have a JS file but no package.json, we can still proceed
+        console.log('  Using existing JavaScript file without package.json');
+        return `Server repaired successfully. Add this configuration:\n\n${this.generateMcpConfig(mainJsFile, serverName)}`;
+      }
+      throw new Error('No valid package.json found and no JavaScript file available');
     }
     console.log('  Success: package.json is valid');
 
-    console.log('\n[Step 3] Installing dependencies...');
-    // Check node_modules
-    const hasNodeModules = await this.checkNodeModules(serverDir);
-    if (!hasNodeModules) {
-      console.log('  node_modules not found, installing dependencies...');
-      try {
-        execSync('npm install', { cwd: serverDir, stdio: 'pipe' });
-        console.log('  Dependencies installed successfully');
-      } catch (error) {
-        console.log('  Error: Failed to install dependencies');
-        throw new Error(`Failed to install dependencies: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    } else {
-      console.log('  Success: Dependencies already installed');
-    }
-
-    console.log('\n[Step 4] Building project...');
-    // Run build if script exists
-    if (packageJson.scripts?.build) {
-      console.log('  Running build script...');
+    // Run build if needed
+    if (!mainJsFile && packageJson.scripts?.build) {
+      console.log('\n[Step 4] Building project...');
       try {
         execSync('npm run build', { cwd: serverDir, stdio: 'pipe' });
         console.log('  Success: Build completed');
+        mainJsFile = await this.findJsFile(serverDir);
       } catch (error) {
         console.log('  Error: Build failed');
         throw new Error(`Build failed: ${error instanceof Error ? error.message : String(error)}`);
       }
+    }
+
+    // Final verification
+    if (!mainJsFile) {
+      console.log('  Error: No JavaScript file found after build');
+      throw new Error('Could not find the JavaScript file after build');
+    }
+
+    // Attempt to read local README and GitHub README for env vars
+    console.log('\n[Step 5] Checking README for environment variables...');
+    let readmeEnv: { [key: string]: string } | null = null;
+    
+    // Try local README first
+    const readmePath = path.join(serverDir, 'README.md');
+    try {
+        await fsAccess(readmePath); // Check if README.md exists
+        console.log(`  Found local README.md at: ${readmePath}`);
+        const readmeContent = await fsReadFile(readmePath, 'utf8');
+        readmeEnv = this.extractEnvFromReadme(readmeContent);
+        if (readmeEnv) {
+            console.log('  Found environment variables in local README');
+        }
+    } catch (error) {
+        console.log(`  Local README.md not found or could not be read at ${readmePath}. Skipping environment variable extraction from README.`);
+    }
+    // Removed GitHub README fallback logic. Only local README is checked now.
+
+    if (!readmeEnv) {
+        console.log('  No environment variables found in any README files');
     } else {
-      console.log('  No build script found, skipping');
+        console.log('  Found environment variables:', Object.keys(readmeEnv).join(', '));
     }
 
-    console.log('\n[Step 5] Locating main JavaScript file...');
-    // Find the main JS file
-    const jsFilePath = await this.findJsFile(serverDir);
-    if (!jsFilePath) {
-      console.log('  Error: Main MPC Server JavaScript file not found');
-      throw new Error('Could not find the main JavaScript file');
-    }
-    console.log('  Success: Main JavaScript file found');
+    // Generate config
+    console.log('\n[Final] Creating MCP server configuration...');
+    const mcpConfig = this.generateMcpConfig(mainJsFile, serverName, readmeEnv);
+    console.log('  Success: Server configuration created');
 
-    console.log('\n[Step 6] Generating MCP configuration...');
-    // Generate MCP configuration
-    const mcpConfig = this.generateMcpConfig(jsFilePath, serverName);
-    console.log('  Success: Configuration generated');
-
-    return `Server repaired successfully. Add this configuration to your settings file at ${
-      process.platform === 'win32' 
-        ? 'C:\\Users\\[USERNAME]\\AppData\\Roaming\\Code\\User\\globalStorage\\saoudrizwan.claude-dev\\settings\\cline_mcp_settings.json'
-        : '~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json'
-    }:\n\n${mcpConfig}`;
+    const settingsPath = this.getSettingsPath();
+    return `Server repaired successfully. Add this configuration to your settings file (${settingsPath}):\n\n${mcpConfig}`;
   }
+
 }
 
 // Set up MCP server handlers
@@ -491,99 +952,130 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
       name: "repair_mcp_server",
-      description: "Repair, fix or install an MCP server by finding its directory, installing dependencies and building",
+      description: "Repair, fix an MCP server by finding its directory, installing dependencies and building",
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
-          serverName: {
-            type: "string",
-            description: "Name of the MCP server to repair (e.g. wikipedia, brave-search)"
-          }
+          server_name: {
+            type: 'string',
+            description: 'The name of the MCP server to repair (fuzzy matching)',
+          },
         },
-        required: ["serverName"]
-      }
+        required: ['server_name'],
+      },
+    },
+    {
+      name: "install_mcp_server",
+      description: "Install a new MCP server from a GitHub repository URL or shorthand (e.g., owner/repo)",
+      inputSchema: {
+        type: 'object',
+        properties: {
+          repo_url: {
+            type: 'string',
+            description: 'GitHub repository URL (https://github.com/owner/repo or owner/repo)',
+          },
+        },
+        required: ['repo_url'],
+      },
     }
-  ]
-}));
+  ] // tools array closes here
+})); // setRequestHandler closes here
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  if (request.params.name !== "repair_mcp_server") {
-    throw new McpError(
-      ErrorCode.MethodNotFound,
-      `Unknown tool: ${request.params.name}`
-    );
-  }
-
-  if (!request.params.arguments?.serverName || typeof request.params.arguments.serverName !== "string") {
-    throw new McpError(
-      ErrorCode.InvalidParams,
-      "Server name is required"
-    );
-  }
-
   const repairTool = new McpRepairTool();
-  
-  // Create a promise that resolves after a short delay
-  const delayPromise = new Promise(resolve => setTimeout(resolve, 100));
-  
+  const delayPromise = new Promise<void>(resolve => setTimeout(resolve, 100));
+
   try {
-    // First wait for the delay to ensure stdio is ready
     await delayPromise;
-    
-    // Then start the repair process
-    console.log("[DEBUG] Starting repair process in MCP server mode");
-    const result = await repairTool.repair(request.params.arguments.serverName);
-    console.log("[DEBUG] Repair process completed successfully");
-    
-    // Add a small delay before returning to ensure all logs are flushed
-    await new Promise(resolve => setTimeout(resolve, 100));
-    
-    return {
-      content: [
-        {
+
+    console.log(`[DEBUG] Handling tool call: ${request.params.name}`);
+
+    if (request.params.name === 'repair_mcp_server') {
+      const serverName = request.params.arguments?.server_name;
+      if (typeof serverName !== 'string') {
+        throw new McpError(ErrorCode.InvalidRequest, 'Missing or invalid server_name');
+      }
+      console.log(`[DEBUG] Starting repair for: ${serverName}`);
+      const result = await repairTool.repair(serverName);
+      console.log("[DEBUG] Repair completed");
+      await delayPromise;
+      return {
+        content: [{
           type: "text",
           text: result
-        }
-      ]
-    };
-  } catch (error) {
-    console.error("[DEBUG] Error in repair process:", error);
-    
-    // Add a small delay before returning error to ensure logs are flushed
-    await new Promise(resolve => setTimeout(resolve, 100));
-    
-    return {
-      content: [
-        {
+        }]
+      };
+
+    } else if (request.params.name === 'install_mcp_server') {
+      const repoUrl = request.params.arguments?.repo_url;
+      if (typeof repoUrl !== 'string') {
+        throw new McpError(ErrorCode.InvalidRequest, 'Missing or invalid repo_url');
+      }
+      console.log(`[DEBUG] Starting install for: ${repoUrl}`);
+      const result = await repairTool.install(repoUrl);
+      console.log("[DEBUG] Install completed");
+      await delayPromise;
+      return {
+        content: [{
           type: "text",
-          text: `Failed to repair server: ${error instanceof Error ? error.message : String(error)}`
-        }
-      ],
-      isError: true
-    };
+          text: result
+        }]
+      };
+
+    } else {
+      console.error(`[DEBUG] Tool not found: ${request.params.name}`);
+      throw new McpError(ErrorCode.MethodNotFound, `Tool '${request.params.name}' not found`);
+    }
+
+  } catch (error) {
+    console.error(`[DEBUG] Error:`, error);
+    await delayPromise;
+
+    if (error instanceof McpError) {
+      throw error;
+    }
+    throw new McpError(
+      ErrorCode.InternalError,
+      `Failed to execute tool: ${error instanceof Error ? error.message : String(error)}`
+    );
   }
 });
 
-// If running as a script
+// CLI mode for testing
 if (process.argv.length > 2) {
-  // Handle both formats:
-  // - bun start -- test
-  // - bun start --test
-  const arg = process.argv[2];
-  const serverName = arg.startsWith('--') ? arg.substring(2) : arg;
-
+  const command = process.argv[2];
   const repairTool = new McpRepairTool();
-  repairTool.repair(serverName)
-    .then(result => {
-      console.log(result);
-      process.exit(0);
-    })
-    .catch(error => {
-      console.error(`Error: ${error.message}`);
-      process.exit(1);
-    });
+
+  if (command === 'install' && process.argv[3]) {
+    // Install mode: bun start install <repo-url>
+    repairTool.install(process.argv[3])
+      .then(result => {
+        console.log(result);
+        process.exit(0);
+      })
+      .catch(error => {
+        console.error(`Error: ${error.message}`);
+        process.exit(1);
+      });
+  } else if (command === 'repair' && process.argv[3]) {
+    // Repair mode: bun start repair <server-name>
+    repairTool.repair(process.argv[3])
+      .then(result => {
+        console.log(result);
+        process.exit(0);
+      })
+      .catch(error => {
+        console.error(`Error: ${error.message}`);
+        process.exit(1);
+      });
+  } else {
+    console.log('Usage:');
+    console.log('  bun start install <repo-url>    Install new MCP server');
+    console.log('  bun start repair <server-name>   Repair existing MCP server');
+    process.exit(1);
+  }
 } else {
-  // Start the MCP server
+  // MCP server mode
   const transport = new StdioServerTransport();
   server.connect(transport).catch(error => {
     process.stderr.write(`Failed to start MCP server: ${error}\n`);
