@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "start": "node build/index.js"
+    "start": "node build/index.js",
+    "test": "node -e \"const os=require('os'),path=require('path'),fs=require('fs');const testDir=path.join(os.homedir(),'OneDrive','Documents','Cline','MCP','qweather-mcp');fs.existsSync(testDir)&&fs.rmSync(testDir,{recursive:true,force:true});\" && npm run build && npm start install https://github.com/overstarry/qweather-mcp"
   },
   "keywords": [
     "mcp",
@@ -19,6 +20,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^0.6.0",
     "glob": "^10.3.10",
+    "spawn-rx": "^5.1.2",
     "zod": "^3.24.2"
   },
   "devDependencies": {

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
-// test with env: https://github.com/overstarry/qweather-mcp
+// test with env:
 // npm start install https://github.com/overstarry/qweather-mcp
+
 // npm start install https://github.com/Garoth/echo-mcp
 // python
 // npm start install https://github.com/Garoth/echo-mcp
@@ -16,7 +17,7 @@ import {
   McpError
 } from '@modelcontextprotocol/sdk/types.js';
 import { access as fsAccess, readdir as fsReaddir, readFile as fsReadFile, stat as fsStat } from 'fs/promises';
-import { accessSync, Dirent } from 'fs';
+import { accessSync, Dirent, readFileSync, writeFileSync } from 'fs';
 
 interface DirentLike {
   isDirectory(): boolean;
@@ -24,8 +25,37 @@ interface DirentLike {
 }
 import * as path from 'path';
 import * as os from 'os';
-import { execSync } from 'child_process';
+// Removed child_process import since we use spawnPromise
 import { glob } from 'glob';
+import { spawnPromise } from "spawn-rx";
+
+// System verification utilities
+async function hasNodeJs() {
+  try {
+    await spawnPromise("node", ["--version"]);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function hasUvx() {
+  try {
+    await spawnPromise("uvx", ["--version"]);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function isNpmPackage(name: string) {
+  try {
+    await spawnPromise("npm", ["view", name, "version"]);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
 
 
 const server = new Server(
@@ -64,11 +94,100 @@ class McpRepairTool {
   /**
    * Get the correct settings file path for the current platform
    */
+  private getMcpConfigPath(): string {
+    const homeDir = os.homedir();
+    // Support both Windows and Unix-like systems
+    const basePath = process.platform === 'win32'
+      ? path.join(homeDir, 'OneDrive', 'Documents', 'Cline', 'MCP')
+      : path.join(homeDir, 'Documents', 'Cline', 'MCP');
+    return path.join(basePath, 'mcp_configs.json');
+  }
+
+  /**
+   * Update MCP configuration file with new server entry
+   */
+  private updateMcpConfig(serverName: string, config: any): void { // Changed to sync
+    const configPath = this.getMcpConfigPath();
+    console.log(`[DEBUG] Updating MCP config at: ${configPath}`);
+
+    try {
+      // Read existing config or create new one using synchronous methods
+      let fullConfig: any;
+      try {
+        const existingConfig = readFileSync(configPath, 'utf8');
+        fullConfig = JSON.parse(existingConfig);
+        console.log('[DEBUG] Successfully read existing config');
+      } catch (error: any) {
+        if (error.code === 'ENOENT') {
+          console.log('[DEBUG] No existing config found, creating new one');
+          fullConfig = { mcpServers: {} };
+        } else {
+          throw error; // Rethrow other errors
+        }
+      }
+
+      // Make sure mcpServers exists
+      if (!fullConfig.mcpServers) {
+        fullConfig.mcpServers = {};
+      }
+
+      // Format Windows paths with exactly two backslashes
+      // Keep paths with single backslashes, JSON.stringify will handle escaping
+      const formattedArgs = config.args?.map((arg: string) => {
+        if (typeof arg === 'string') {
+          // Ensure single backslashes
+          return arg.replace(/\\\\/g, '\\');
+        }
+        return arg;
+      }) ?? [];
+
+
+      // Add server config
+      const serverConfig: any = {
+        command: config.command,
+        args: formattedArgs,
+        enabled: true,
+        disabled: false,
+        autoApprove: []
+      };
+
+      // Add env if present
+      if (config.env) {
+        serverConfig.env = config.env;
+      }
+
+      // Update config object
+      fullConfig.mcpServers[serverName] = serverConfig;
+// Custom JSON stringifier to handle backslashes
+const jsonString = JSON.stringify(fullConfig, (key, value) => {
+  if (typeof value === 'string') {
+    // Remove any double backslashes before stringifying
+    return value.replace(/\\\\/g, '\\');
+  }
+  return value;
+}, 2);
+
+// Write to file synchronously
+writeFileSync(configPath, jsonString, 'utf8');
+
+
+      console.log('[DEBUG] Successfully updated config file');
+      console.log('[DEBUG] Added/Updated server config:', JSON.stringify(serverConfig, null, 2));
+
+    } catch (error) {
+      console.error('[DEBUG] Failed to update config:', error);
+      throw new Error(`Failed to update MCP config: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Commenting out getSettingsPath as requested for now
+  /*
   private getSettingsPath(): string {
     return process.platform === 'win32'
       ? path.join(os.homedir(), 'AppData', 'Roaming', 'Code - Insiders', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'settings', 'cline_mcp_settings.json')
       : path.join(os.homedir(), 'Library', 'Application Support', 'Code - Insiders', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'settings', 'cline_mcp_settings.json');
   }
+  */
 
   /**
    * Get the MCP base path with environment variable support and validation
@@ -92,14 +211,32 @@ class McpRepairTool {
     const homeDir = os.homedir();
     console.log(`[DEBUG] Home directory: ${homeDir}`);
     
+    // Build platform-specific paths
+    const localPaths = process.platform === 'win32'
+      ? [
+          path.join(homeDir, 'OneDrive', 'Documents', 'Cline', 'MCP'),
+          path.join(homeDir, 'Documents', 'Cline', 'MCP')
+        ]
+      : [
+          path.join(homeDir, 'Documents', 'Cline', 'MCP'),
+          path.join(homeDir, 'Cline', 'MCP')
+        ];
+
+    // Common paths across platforms
     const possiblePaths = [
-      // PLEASE AI, do not remove the comment, it's for later in my project.
-      // Local MCP server paths
-      path.join(homeDir, 'OneDrive', 'Documents', 'Cline', 'MCP'),
-      path.join(homeDir, 'Documents', 'Cline', 'MCP'),
-      path.join(homeDir, 'Cline', 'MCP'),
+      ...localPaths,
       // Global npm installation paths
-      path.join(homeDir, 'AppData', 'Roaming', 'npm', 'node_modules', '@modelcontextprotocol'),
+      // Global npm installation paths for different platforms
+      ...(process.platform === 'win32'
+        ? [path.join(homeDir, 'AppData', 'Roaming', 'npm', 'node_modules', '@modelcontextprotocol')]
+        : process.platform === 'darwin'
+          ? [path.join(homeDir, 'Library', 'node_modules', '@modelcontextprotocol')]
+          : [
+              path.join('/usr', 'local', 'lib', 'node_modules', '@modelcontextprotocol'),
+              path.join(homeDir, '.node_modules', '@modelcontextprotocol'),
+              path.join(homeDir, '.nvm', 'versions', 'node', process.version, 'lib', 'node_modules', '@modelcontextprotocol')
+            ]
+      ),
       // Add current working directory as fallback
       process.cwd()
     ];
@@ -445,9 +582,14 @@ class McpRepairTool {
       [serverName]: serverConfig,
     };
 
-    // Custom JSON stringifier to prevent additional escaping
-    const jsonString = JSON.stringify(config, null, 2)
-      .replace(/\\\\\\\\/g, '\\\\'); // Convert any quadruple backslashes to double
+    // Convert to JSON with custom stringifier to handle Windows paths
+    const jsonString = JSON.stringify(config, (key, value) => {
+      if (typeof value === 'string' && process.platform === 'win32') {
+        // Convert Windows paths to use single backslashes
+        return value.replace(/\\\\/g, '\\');
+      }
+      return value;
+    }, 2);
 
     console.log(`[DEBUG] Generated config:\n${jsonString}`);
     return jsonString;
@@ -653,7 +795,7 @@ class McpRepairTool {
       console.log(`[DEBUG] Executing git clone: ${command}`);
       
       try {
-        execSync(command, { stdio: 'pipe' });
+        await spawnPromise("git", ["clone", cloneUrl, targetDir]);
         console.log('[DEBUG] Git clone successful');
       } catch (error: any) {
         const errorMessage = error?.message || String(error);
@@ -683,7 +825,7 @@ class McpRepairTool {
     console.log(`[DEBUG] Installing dependencies in ${directory}`);
     try {
       console.log('[DEBUG] Executing: npm install');
-      execSync('npm install', { cwd: directory, stdio: 'pipe' });
+      await spawnPromise('npm', ['install'], { cwd: directory });
       console.log('[DEBUG] npm install successful');
     } catch (error) {
       console.error('[DEBUG] Error during npm install:', error);
@@ -699,7 +841,7 @@ class McpRepairTool {
     if (packageJson?.scripts?.build) {
       console.log('[DEBUG] Found build script, executing: npm run build');
       try {
-        execSync('npm run build', { cwd: directory, stdio: 'pipe' });
+        await spawnPromise('npm', ['run', 'build'], { cwd: directory });
         console.log('[DEBUG] npm run build successful');
       } catch (error) {
         console.error('[DEBUG] Error during npm run build:', error);
@@ -743,10 +885,41 @@ class McpRepairTool {
     return ''; // Return empty string if no README is found
   }
 
+async install(repoUrl: string): Promise<string> {
+  console.log(`Starting installation process for repository: ${repoUrl}`);
+  let readmeEnv: { [key: string]: string } | null = null;
 
-  async install(repoUrl: string): Promise<string> {
-    console.log(`Starting installation process for repository: ${repoUrl}`);
-    let readmeEnv: { [key: string]: string } | null = null;
+  // Check for required dependencies
+  // Check installation dependencies and determine type
+  const hasNode = await hasNodeJs();
+  const hasPython = await hasUvx();
+
+  console.log('\n[Installation Type Detection]');
+  if (hasNode) {
+    console.log('✓ Node.js is installed - Can handle Node.js MCP servers');
+  } else {
+    console.log('✗ Node.js is not installed');
+  }
+
+  if (hasPython) {
+    console.log('✓ Python (UVX) is installed - Can handle Python MCP servers');
+  } else {
+    console.log('✗ Python (UVX) is not installed');
+  }
+
+  if (!hasNode && !hasPython) {
+    throw new Error('Neither Node.js nor Python (UVX) is installed. Please install at least one of them to continue.');
+  }
+
+  // Log overall installation type
+  if (hasNode && hasPython) {
+    console.log('\n[INFO] Full installation capabilities - Can handle both Node.js and Python MCP servers');
+  } else if (hasNode) {
+    console.log('\n[INFO] Node.js-only installation capabilities');
+  } else {
+    console.log('\n[INFO] Python-only installation capabilities');
+  }
+
 
     // Helper function for delays between steps
     const stepDelay = async () => new Promise(resolve => setTimeout(resolve, 500));
@@ -765,16 +938,112 @@ class McpRepairTool {
     }
     const [, owner, repo] = urlMatch;
 
+    // Verify if package exists in npm registry
+    const isNpmPkg = await isNpmPackage(`@${owner}/${repo}`);
+    console.log(`[DEBUG] Package @${owner}/${repo} exists in npm registry: ${isNpmPkg}`);
+console.log('\n[Step 2] Cloning repository...');
+try {
+  await this.cloneRepository(cloneUrl, installDir);
+  await stepDelay();
+} catch (error) {
+  console.error('[DEBUG] Clone failed:', error);
+  throw error;
+}
+console.log('  Success: Repository cloned');
 
-    console.log('\n[Step 2] Cloning repository...');
+// Detect project type
+console.log('\n[Step 2.1] Detecting project type...');
+// Project type detection variables
+const projectType = {
+  isNode: false,
+  isPython: false
+};
+
+// Check for package.json (Node.js)
+try {
+  await fsAccess(path.join(installDir, 'package.json'));
+  projectType.isNode = true;
+  console.log('  ✓ Found package.json - This appears to be a Node.js project');
+} catch {
+  console.log('  ✗ No package.json found');
+}
+
+// Check for Python project indicators
+try {
+  const hasPyRequirements = await fsAccess(path.join(installDir, 'requirements.txt'))
+    .then(() => true)
+    .catch(() => false);
+  const hasPyProject = await fsAccess(path.join(installDir, 'pyproject.toml'))
+    .then(() => true)
+    .catch(() => false);
+    
+  if (hasPyRequirements || hasPyProject) {
+    projectType.isPython = true;
+    console.log('  ✓ Found Python project files - This appears to be a Python project');
+  }
+} catch {
+  console.log('  ✗ No Python project files found');
+}
+
+if (!projectType.isNode && !projectType.isPython) {
+  console.log('  ⚠️ Warning: Could not definitively determine project type');
+}
+
+// Handle Python project installation
+if (projectType.isPython) {
+  console.log('\n[Step 3] Installing Python project...');
+  if (await hasUvx()) {
     try {
-      await this.cloneRepository(cloneUrl, installDir);
-      await stepDelay();
+      await spawnPromise('uvx', ['install'], { cwd: installDir });
+      console.log('  ✓ Python dependencies installed via UVX');
     } catch (error) {
-      console.error('[DEBUG] Clone failed:', error);
-      throw error;
+      console.error('  ✗ Failed to install Python dependencies:', error);
+      throw new Error('Python dependency installation failed');
     }
+  } else {
+    console.warn('  ⚠️ UVX not installed - Python dependencies cannot be installed');
+    console.warn('  Please install UVX to fully support Python MCP servers: https://docs.astral.sh/uv');
+  }
+}
+
     console.log('  Success: Repository cloned');
+
+    // Detect project type
+    console.log('\n[Step 2.1] Detecting project type...');
+    let isNodeProject = false;
+    let isPythonProject = false;
+
+    // Check for package.json (Node.js)
+    try {
+      await fsAccess(path.join(installDir, 'package.json'));
+      isNodeProject = true;
+      console.log('  ✓ Found package.json - This appears to be a Node.js project');
+    } catch {
+      console.log('  ✗ No package.json found');
+    }
+
+    // Check for requirements.txt or pyproject.toml (Python)
+    try {
+      const hasPyRequirements = await fsAccess(path.join(installDir, 'requirements.txt'))
+        .then(() => true)
+        .catch(() => false);
+      const hasPyProject = await fsAccess(path.join(installDir, 'pyproject.toml'))
+        .then(() => true)
+        .catch(() => false);
+      
+      if (hasPyRequirements || hasPyProject) {
+        isPythonProject = true;
+        console.log('  ✓ Found Python project files - This appears to be a Python project');
+      }
+    } catch {
+      console.log('  ✗ No Python project files found');
+    }
+
+    if (!isNodeProject && !isPythonProject) {
+      console.log('  ⚠️ Warning: Could not definitively determine project type');
+    } else {
+      console.log(`  Project type: ${isNodeProject ? 'Node.js' : 'Python'}`);
+    }
 
     console.log('\n[Step 3] Verifying package.json...');
     const packageJson = await this.verifyPackageJson(installDir);
@@ -798,6 +1067,16 @@ class McpRepairTool {
     await this.buildProject(installDir, packageJson);
     // Build success/failure handled within the function
 
+    // Clean up node_modules after build
+    const nodeModulesPath = path.join(installDir, 'node_modules');
+    try {
+      const { rm } = await import('fs/promises');
+      await rm(nodeModulesPath, { recursive: true, force: true });
+      console.log('  Cleaned up node_modules directory after build');
+    } catch (error) {
+      console.log('  No node_modules directory to clean up');
+    }
+    
     console.log('\n[Step 6] Locating compiled JavaScript file...');
     const jsFile = await this.findJsFile(installDir);
     if (!jsFile) {
@@ -827,16 +1106,29 @@ class McpRepairTool {
       console.warn('  Warning: Error reading local README.md:', error instanceof Error ? error.message : String(error));
     }
 
-    console.log('\n[Step 7] Generating MCP configuration...'); // Renumbered step
-    const mcpConfig = this.generateMcpConfig(jsFile, repoName, readmeEnv); // Use potentially updated readmeEnv
-    console.log('  Success: Server configuration created');
+    console.log('\n[Step 7] Updating configuration...');
+    const serverConfig = {
+      command: "node",
+      args: [jsFile],
+      enabled: true,
+      disabled: false,
+      autoApprove: [],
+      ...(readmeEnv && { env: readmeEnv })
+    };
 
-    const settingsPath = this.getSettingsPath();
-    const envMessage = readmeEnv // Now use the final readmeEnv value
-      ? `\n\nFound environment variables: ${Object.keys(readmeEnv).join(', ')}\nThese have been added to your configuration.`
-      : '\n\nNo environment variables were found in the README. You may need to configure them manually.';
+    // Update mcp_configs.json synchronously
+    this.updateMcpConfig(repoName, serverConfig);
+    console.log('  Success: Local config updated');
 
-    return `Server '${repoName}' installed successfully from ${repoUrl}.${envMessage}\n\nAdd this configuration to your settings file (${settingsPath}):\n\n${mcpConfig}`;
+    // Generate formatted config string for display
+    const mcpConfigString = this.generateMcpConfig(jsFile, repoName, readmeEnv);
+    const configPath = this.getMcpConfigPath();
+
+    const envMessage = readmeEnv
+      ? `\n\nFound environment variables: ${Object.keys(readmeEnv).join(', ')}\nThese have been added to your configuration in ${configPath}.`
+      : `\n\nNo environment variables were found in the README. You may need to configure them manually in ${configPath}.`;
+
+    return `Server '${repoName}' installed successfully from ${repoUrl}.${envMessage}\n\nConfiguration file updated: ${configPath}\n\nGenerated config for reference:\n\n${mcpConfigString}`;
   }
 
   /**
@@ -896,7 +1188,7 @@ class McpRepairTool {
     if (!mainJsFile && packageJson.scripts?.build) {
       console.log('\n[Step 4] Building project...');
       try {
-        execSync('npm run build', { cwd: serverDir, stdio: 'pipe' });
+        await spawnPromise('npm', ['run', 'build'], { cwd: serverDir });
         console.log('  Success: Build completed');
         mainJsFile = await this.findJsFile(serverDir);
       } catch (error) {
@@ -941,8 +1233,8 @@ class McpRepairTool {
     const mcpConfig = this.generateMcpConfig(mainJsFile, serverName, readmeEnv);
     console.log('  Success: Server configuration created');
 
-    const settingsPath = this.getSettingsPath();
-    return `Server repaired successfully. Add this configuration to your settings file (${settingsPath}):\n\n${mcpConfig}`;
+    const configPath = this.getMcpConfigPath();
+    return `Server repaired successfully. Add this configuration to your settings file (${configPath}):\n\n${mcpConfig}`;
   }
 
 }

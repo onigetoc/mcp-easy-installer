@@ -25,17 +25,27 @@ To use the MCP Generator, run:
 npm run build
 ```
 
+<!--
+// Generate using?:
+const config = JSON.stringify({ name: 'mcp-install-repair-tool', command: 'npx', args: ["-y", "@onigetoc/mcp-install-repair-tool"] });
+const urlForWebsites = `vscode:mcp/install?${encodeURIComponent(config)}`;
+// Github markdown does not allow linking to `vscode:` directly, so you can use our redirect:
+const urlForGithub = `https://insiders.vscode.dev/redirect?url=${encodeURIComponent(urlForWebsites)}`;
+-->
+
+## Example config
 ```json
-"mcp-install-repair-tool": {
-    "command": "node",
-    "args": [
-    "C:\\Users\\LENOVO\\APPS\\0-MCP\\mcp-fix-installer\\build\\index.js"
-    ],
-    "env": {
-    "GITHUB_TOKEN": "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"
-    },
-    "enabled": false,
-    "disabled": true
+{
+  "mcpServers": {
+    "mcp-install-repair-tool": {
+        "command": "node",
+        "args": [
+        "C:\\Users\\LENOVO\\APPS\\0-MCP\\mcp-fix-installer\\build\\index.js"],
+        "env": {"GITHUB_TOKEN":"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"},
+        "enabled": false,
+        "disabled": true
+    }
+  }
 }
 ```
 
