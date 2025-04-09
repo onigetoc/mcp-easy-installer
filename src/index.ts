@@ -2,6 +2,8 @@
 
 // test with env:
 // npm start install https://github.com/overstarry/qweather-mcp
+// Unistall: npm start uninstall server-brave-search
+// from npmjs.com: npm start install https://www.npmjs.com/package/@modelcontextprotocol/server-brave-search
 
 // npm start install https://github.com/Garoth/echo-mcp
 // python
@@ -28,36 +30,19 @@ import * as os from 'os';
 // Removed child_process import since we use spawnPromise
 import { glob } from 'glob';
 import { spawnPromise } from "spawn-rx";
-
-// System verification utilities
-async function hasNodeJs() {
-  try {
-    await spawnPromise("node", ["--version"]);
-    return true;
-  } catch (e) {
-    return false;
-  }
-}
-
-async function hasUvx() {
-  try {
-    await spawnPromise("uvx", ["--version"]);
-    return true;
-  } catch (e) {
-    return false;
-  }
-}
-
-async function isNpmPackage(name: string) {
-  try {
-    await spawnPromise("npm", ["view", name, "version"]);
-    return true;
-  } catch (e) {
-    return false;
-  }
-}
-
-
+import { ensureFlowvibeMcpStructure } from './utils.js';
+import {
+  hasNodeJs,
+  hasUvx,
+  isNpmPackage,
+  parseGithubUrl,
+  parseModelContextUrl,
+  cloneRepository,
+  downloadAndExtractNpmPackage,
+  installDependencies,
+  buildProject
+} from './download-manager.js';
+import { uninstallServer } from './uninstall-manager.js';
 const server = new Server(
   {
     name: "mcp-install-repair-tool",
@@ -84,23 +69,21 @@ interface PackageJson {
 }
 
 class McpRepairTool {
-  private readonly mcpBasePath: string;
+  public readonly mcpBasePath: string;
+  public readonly mcpConfigPath: string;
   private readonly buildDirs = ['dist', 'build'];  // Prioritize dist over build since it's more commonly used
 
   constructor() {
-    this.mcpBasePath = this.getMcpBasePath();
+    const { basePath, configPath } = ensureFlowvibeMcpStructure();
+    this.mcpBasePath = basePath;
+    this.mcpConfigPath = configPath;
   }
 
   /**
-   * Get the correct settings file path for the current platform
+   * Public method to get MCP config path
    */
-  private getMcpConfigPath(): string {
-    const homeDir = os.homedir();
-    // Support both Windows and Unix-like systems
-    const basePath = process.platform === 'win32'
-      ? path.join(homeDir, 'OneDrive', 'Documents', 'Cline', 'MCP')
-      : path.join(homeDir, 'Documents', 'Cline', 'MCP');
-    return path.join(basePath, 'mcp_configs.json');
+  public getMcpConfigPath(): string {
+    return this.mcpConfigPath;
   }
 
   /**
@@ -190,73 +173,10 @@ writeFileSync(configPath, jsonString, 'utf8');
   */
 
   /**
-   * Get the MCP base path with environment variable support and validation
+   * Get the MCP base path - now uses ensureFlowvibeMcpStructure
    */
   private getMcpBasePath(): string {
-    console.log('[DEBUG] Getting MCP base path...');
-    
-    // 1. Check environment variable first
-    const envPath = process.env.MCP_BASE_PATH;
-    if (envPath) {
-      try {
-        accessSync(envPath);
-        console.log(`[DEBUG] Using MCP path from environment: ${envPath}`);
-        return envPath;
-      } catch (error) {
-        console.warn(`[DEBUG] Warning: MCP_BASE_PATH ${envPath} is not accessible: ${error}`);
-      }
-    }
-
-    // 2. Try multiple possible paths
-    const homeDir = os.homedir();
-    console.log(`[DEBUG] Home directory: ${homeDir}`);
-    
-    // Build platform-specific paths
-    const localPaths = process.platform === 'win32'
-      ? [
-          path.join(homeDir, 'OneDrive', 'Documents', 'Cline', 'MCP'),
-          path.join(homeDir, 'Documents', 'Cline', 'MCP')
-        ]
-      : [
-          path.join(homeDir, 'Documents', 'Cline', 'MCP'),
-          path.join(homeDir, 'Cline', 'MCP')
-        ];
-
-    // Common paths across platforms
-    const possiblePaths = [
-      ...localPaths,
-      // Global npm installation paths
-      // Global npm installation paths for different platforms
-      ...(process.platform === 'win32'
-        ? [path.join(homeDir, 'AppData', 'Roaming', 'npm', 'node_modules', '@modelcontextprotocol')]
-        : process.platform === 'darwin'
-          ? [path.join(homeDir, 'Library', 'node_modules', '@modelcontextprotocol')]
-          : [
-              path.join('/usr', 'local', 'lib', 'node_modules', '@modelcontextprotocol'),
-              path.join(homeDir, '.node_modules', '@modelcontextprotocol'),
-              path.join(homeDir, '.nvm', 'versions', 'node', process.version, 'lib', 'node_modules', '@modelcontextprotocol')
-            ]
-      ),
-      // Add current working directory as fallback
-      process.cwd()
-    ];
-
-    console.log('[DEBUG] Trying possible paths:', possiblePaths);
-
-    for (const testPath of possiblePaths) {
-      try {
-        accessSync(testPath);
-        console.log(`[DEBUG] Found valid MCP path: ${testPath}`);
-        return testPath;
-      } catch (error) {
-        console.log(`[DEBUG] Path ${testPath} not accessible: ${error}`);
-      }
-    }
-
-    // If we get here, no valid path was found
-    const errorMsg = `Could not find valid MCP path. Tried:\n${possiblePaths.join('\n')}`;
-    console.error('[DEBUG] ' + errorMsg);
-    throw new Error(errorMsg);
+    return this.mcpBasePath;
   }
 
   /**
@@ -698,160 +618,6 @@ writeFileSync(configPath, jsonString, 'utf8');
   }
 
 
-  /**
-   * Parse GitHub URL or shorthand to get clone URL and repo name
-   */
-  private parseGithubUrl(repoInput: string): { cloneUrl: string; repoName: string } {
-    console.log(`[DEBUG] Parsing GitHub input: ${repoInput}`);
-    let cloneUrl = '';
-    let repoName = '';
-
-    // Regex to match GitHub URLs (HTTPS and SSH) and shorthand
-    const githubUrlRegex = /^(?:https:\/\/github\.com\/|git@github\.com:)([^\/]+\/[^\.\/]+)(?:\.git)?$/;
-    const shorthandRegex = /^([^\/]+\/[^\.\/]+)$/;
-
-    const urlMatch = repoInput.match(githubUrlRegex);
-    const shorthandMatch = repoInput.match(shorthandRegex);
-
-    if (urlMatch) {
-      repoName = urlMatch[1];
-      cloneUrl = `https://github.com/${repoName}.git`;
-      console.log(`[DEBUG] Matched full URL. Repo: ${repoName}, Clone URL: ${cloneUrl}`);
-    } else if (shorthandMatch) {
-      repoName = shorthandMatch[1];
-      cloneUrl = `https://github.com/${repoName}.git`;
-      console.log(`[DEBUG] Matched shorthand. Repo: ${repoName}, Clone URL: ${cloneUrl}`);
-    } else {
-      console.error('[DEBUG] Invalid GitHub URL or shorthand format');
-      throw new Error('Invalid GitHub URL or shorthand format. Use format like `owner/repo` or `https://github.com/owner/repo`.');
-    }
-
-    // Extract the final part of the repo name for the directory
-    const repoNameParts = repoName.split('/');
-    const dirName = repoNameParts[repoNameParts.length - 1];
-
-    return { cloneUrl, repoName: dirName };
-  }
-
-  /**
-   * Clone a Git repository
-   */
-  private async cloneRepository(cloneUrl: string, targetDir: string): Promise<void> {
-    console.log(`[DEBUG] Cloning repository ${cloneUrl} into ${targetDir}`);
-    try {
-      // Create base directory if needed
-      const baseDir = path.dirname(targetDir);
-      await import('fs/promises').then(fs => fs.mkdir(baseDir, { recursive: true }));
-
-      // Check if directory exists and attempt cleanup if needed
-      try {
-        const exists = await import('fs/promises')
-          .then(fs => fs.access(targetDir)
-          .then(() => true)
-          .catch(() => false));
-        
-        if (exists) {
-          console.log('[DEBUG] Found existing installation directory');
-          
-          try {
-            // Check if it's a valid installation or corrupted
-            const hasPackageJson = await import('fs/promises')
-              .then(fs => fs.access(path.join(targetDir, 'package.json'))
-              .then(() => true)
-              .catch(() => false));
-
-            if (hasPackageJson) {
-              throw new Error(
-                `Installation directory already exists and appears to be a valid installation: ${targetDir}\n` +
-                `To reinstall, first remove the existing directory manually.`
-              );
-            } else {
-              console.log('[DEBUG] Existing directory appears to be incomplete/corrupted, cleaning up...');
-              await import('fs/promises').then(fs => fs.rm(targetDir, { recursive: true, force: true }));
-              console.log('[DEBUG] Cleanup successful');
-            }
-          } catch (error: any) {
-            if (error?.message?.includes('already exists')) {
-              throw error; // Rethrow our custom error
-            }
-            // Other errors during cleanup - warn but continue
-            console.warn('[DEBUG] Warning during cleanup:', error?.message || String(error));
-          }
-        }
-      } catch (error: any) {
-        if (error?.code !== 'ENOENT' && !error?.message?.includes('already exists')) {
-          throw error; // Rethrow unexpected errors
-        }
-        // ENOENT is fine - directory doesn't exist
-      }
-
-      // Clone repository with retry
-      const maxRetries = 3;
-      let retryCount = 0;
-      let lastError;
-
-      // Single attempt at cloning - we've already checked directory doesn't exist
-      const command = `git clone ${cloneUrl} "${targetDir.replace(/\\/g, '\\\\')}"`;
-      console.log(`[DEBUG] Executing git clone: ${command}`);
-      
-      try {
-        await spawnPromise("git", ["clone", cloneUrl, targetDir]);
-        console.log('[DEBUG] Git clone successful');
-      } catch (error: any) {
-        const errorMessage = error?.message || String(error);
-        console.error('[DEBUG] Git clone failed:', errorMessage);
-        
-        // Provide more helpful error messages
-        if (errorMessage.includes('already exists')) {
-          throw new Error(
-            `Cannot clone - directory already exists: ${targetDir}\n` +
-            `Please remove it manually if you want to reinstall this server.`
-          );
-        } else {
-          throw new Error(`Failed to clone repository: ${errorMessage}`);
-        }
-      }
-      
-    } catch (error) {
-      console.error('[DEBUG] Error during git clone:', error);
-      throw new Error(`Failed to clone repository: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
-  /**
-   * Install dependencies using npm
-   */
-  private async installDependencies(directory: string): Promise<void> {
-    console.log(`[DEBUG] Installing dependencies in ${directory}`);
-    try {
-      console.log('[DEBUG] Executing: npm install');
-      await spawnPromise('npm', ['install'], { cwd: directory });
-      console.log('[DEBUG] npm install successful');
-    } catch (error) {
-      console.error('[DEBUG] Error during npm install:', error);
-      throw new Error(`Failed to install dependencies: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
-  /**
-   * Build the project using npm build script
-   */
-  private async buildProject(directory: string, packageJson: PackageJson | null): Promise<void> {
-    console.log(`[DEBUG] Building project in ${directory}`);
-    if (packageJson?.scripts?.build) {
-      console.log('[DEBUG] Found build script, executing: npm run build');
-      try {
-        await spawnPromise('npm', ['run', 'build'], { cwd: directory });
-        console.log('[DEBUG] npm run build successful');
-      } catch (error) {
-        console.error('[DEBUG] Error during npm run build:', error);
-        // Don't throw an error here, finding the JS file later will fail if build was necessary
-        console.warn(`Build script failed: ${error instanceof Error ? error.message : String(error)}. Proceeding to find JS file anyway.`);
-      }
-    } else {
-      console.log('[DEBUG] No build script found in package.json, skipping build step.');
-    }
-  }
 
   /**
    * Main install function
@@ -925,31 +691,43 @@ async install(repoUrl: string): Promise<string> {
     const stepDelay = async () => new Promise(resolve => setTimeout(resolve, 500));
 
     console.log('\n[Step 1] Parsing repository URL...');
-    const { cloneUrl, repoName } = this.parseGithubUrl(repoUrl);
-    const installDir = path.join(this.mcpBasePath, repoName);
-    console.log(`  Success: Repo Name: ${repoName}, Install Dir: ${installDir}`);
-    
-    await stepDelay();
+    let repoName: string;
+    let installDir: string;
 
-    // Extract owner/repo from clone URL
-    const urlMatch = cloneUrl.match(/github\.com[/:]([\w-]+)\/([\w-]+)(?:\.git)?$/);
-    if (!urlMatch) {
-      throw new Error('Could not parse owner/repo from GitHub URL');
+    // Check if this is a modelcontextprotocol repository or npmjs URL
+    if (repoUrl.includes('modelcontextprotocol') || repoUrl.includes('npmjs.com')) {
+      // Get server name and construct package name
+      const serverName = parseModelContextUrl(repoUrl);
+      repoName = `server-${serverName}`;
+      installDir = path.join(this.mcpBasePath, repoName);
+      console.log(`  Success: Server Name: ${serverName}, Install Dir: ${installDir}`);
+
+      await stepDelay();
+      console.log('\n[Step 2] Downloading npm package...');
+      try {
+        await downloadAndExtractNpmPackage(repoUrl, installDir);
+        console.log('  Success: Package downloaded and extracted');
+      } catch (error) {
+        console.error('[DEBUG] Download failed:', error);
+        throw error;
+      }
+    } else {
+      // Handle regular GitHub repository
+      const { cloneUrl, repoName: parsedRepoName } = parseGithubUrl(repoUrl);
+      repoName = parsedRepoName;
+      installDir = path.join(this.mcpBasePath, repoName);
+      console.log(`  Success: Repo Name: ${repoName}, Install Dir: ${installDir}`);
+
+      await stepDelay();
+      console.log('\n[Step 2] Cloning repository...');
+      try {
+        await cloneRepository(cloneUrl, installDir);
+        console.log('  Success: Repository cloned');
+      } catch (error) {
+        console.error('[DEBUG] Clone failed:', error);
+        throw error;
+      }
     }
-    const [, owner, repo] = urlMatch;
-
-    // Verify if package exists in npm registry
-    const isNpmPkg = await isNpmPackage(`@${owner}/${repo}`);
-    console.log(`[DEBUG] Package @${owner}/${repo} exists in npm registry: ${isNpmPkg}`);
-console.log('\n[Step 2] Cloning repository...');
-try {
-  await this.cloneRepository(cloneUrl, installDir);
-  await stepDelay();
-} catch (error) {
-  console.error('[DEBUG] Clone failed:', error);
-  throw error;
-}
-console.log('  Success: Repository cloned');
 
 // Detect project type
 console.log('\n[Step 2.1] Detecting project type...');
@@ -1057,14 +835,14 @@ if (projectType.isPython) {
 
     console.log('\n[Step 4] Installing dependencies...');
     if (packageJson) { // Only run npm install if package.json exists
-      await this.installDependencies(installDir);
+      await installDependencies(installDir);
       console.log('  Success: Dependencies installed');
     } else {
       console.log('  Skipping dependency installation (no package.json)');
     }
 
     console.log('\n[Step 5] Building project...');
-    await this.buildProject(installDir, packageJson);
+    await buildProject(installDir, packageJson);
     // Build success/failure handled within the function
 
     // Clean up node_modules after build
@@ -1258,20 +1036,34 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: "install_mcp_server",
-      description: "Install a new MCP server from a GitHub repository URL or shorthand (e.g., owner/repo)",
+      description: "Install a new MCP server from a GitHub repository URL, shorthand (owner/repo), or npm package URL",
       inputSchema: {
         type: 'object',
         properties: {
           repo_url: {
             type: 'string',
-            description: 'GitHub repository URL (https://github.com/owner/repo or owner/repo)',
+            description: 'GitHub URL, shorthand (owner/repo), or npm URL (https://www.npmjs.com/package/@modelcontextprotocol/server-name)',
           },
         },
         required: ['repo_url'],
       },
+    },
+    {
+      name: "uninstall_mcp_server",
+      description: "Uninstall an MCP server by removing its directory and configuration",
+      inputSchema: {
+        type: 'object',
+        properties: {
+          server_name: {
+            type: 'string',
+            description: 'The name of the MCP server to uninstall',
+          },
+        },
+        required: ['server_name'],
+      },
     }
-  ] // tools array closes here
-})); // setRequestHandler closes here
+  ]
+}));
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const repairTool = new McpRepairTool();
@@ -1279,46 +1071,50 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   try {
     await delayPromise;
-
     console.log(`[DEBUG] Handling tool call: ${request.params.name}`);
 
-    if (request.params.name === 'repair_mcp_server') {
-      const serverName = request.params.arguments?.server_name;
-      if (typeof serverName !== 'string') {
-        throw new McpError(ErrorCode.InvalidRequest, 'Missing or invalid server_name');
+    switch (request.params.name) {
+      case 'repair_mcp_server': {
+        const serverName = request.params.arguments?.server_name;
+        if (typeof serverName !== 'string') {
+          throw new McpError(ErrorCode.InvalidRequest, 'Missing or invalid server_name');
+        }
+        console.log(`[DEBUG] Starting repair for: ${serverName}`);
+        const result = await repairTool.repair(serverName);
+        console.log("[DEBUG] Repair completed");
+        await delayPromise;
+        return { content: [{ type: "text", text: result }] };
       }
-      console.log(`[DEBUG] Starting repair for: ${serverName}`);
-      const result = await repairTool.repair(serverName);
-      console.log("[DEBUG] Repair completed");
-      await delayPromise;
-      return {
-        content: [{
-          type: "text",
-          text: result
-        }]
-      };
 
-    } else if (request.params.name === 'install_mcp_server') {
-      const repoUrl = request.params.arguments?.repo_url;
-      if (typeof repoUrl !== 'string') {
-        throw new McpError(ErrorCode.InvalidRequest, 'Missing or invalid repo_url');
+      case 'install_mcp_server': {
+        const repoUrl = request.params.arguments?.repo_url;
+        if (typeof repoUrl !== 'string') {
+          throw new McpError(ErrorCode.InvalidRequest, 'Missing or invalid repo_url');
+        }
+        console.log(`[DEBUG] Starting install for: ${repoUrl}`);
+        const result = await repairTool.install(repoUrl);
+        console.log("[DEBUG] Install completed");
+        await delayPromise;
+        return { content: [{ type: "text", text: result }] };
       }
-      console.log(`[DEBUG] Starting install for: ${repoUrl}`);
-      const result = await repairTool.install(repoUrl);
-      console.log("[DEBUG] Install completed");
-      await delayPromise;
-      return {
-        content: [{
-          type: "text",
-          text: result
-        }]
-      };
 
-    } else {
-      console.error(`[DEBUG] Tool not found: ${request.params.name}`);
-      throw new McpError(ErrorCode.MethodNotFound, `Tool '${request.params.name}' not found`);
+      case 'uninstall_mcp_server': {
+        const serverName = request.params.arguments?.server_name;
+        if (typeof serverName !== 'string') {
+          throw new McpError(ErrorCode.InvalidRequest, 'Missing or invalid server_name');
+        }
+        console.log(`[DEBUG] Starting uninstall for: ${serverName}`);
+        const result = await uninstallServer(serverName, repairTool.mcpBasePath);
+        console.log("[DEBUG] Uninstall completed");
+        await delayPromise;
+        return { content: [{ type: "text", text: result }] };
+      }
+
+      default: {
+        console.error(`[DEBUG] Tool not found: ${request.params.name}`);
+        throw new McpError(ErrorCode.MethodNotFound, `Tool '${request.params.name}' not found`);
+      }
     }
-
   } catch (error) {
     console.error(`[DEBUG] Error:`, error);
     await delayPromise;
@@ -1360,10 +1156,22 @@ if (process.argv.length > 2) {
         console.error(`Error: ${error.message}`);
         process.exit(1);
       });
+  } else if (command === 'uninstall' && process.argv[3]) {
+    // Uninstall mode: npm start uninstall <server-name>
+    uninstallServer(process.argv[3], repairTool.mcpBasePath)
+      .then(result => {
+        console.log(result);
+        process.exit(0);
+      })
+      .catch(error => {
+        console.error(`Error: ${error.message}`);
+        process.exit(1);
+      });
   } else {
     console.log('Usage:');
-    console.log('  bun start install <repo-url>    Install new MCP server');
-    console.log('  bun start repair <server-name>   Repair existing MCP server');
+    console.log('  npm start install <repo-url>     Install new MCP server');
+    console.log('  npm start repair <server-name>   Repair existing MCP server');
+    console.log('  npm start uninstall <server-name> Uninstall MCP server');
     process.exit(1);
   }
 } else {
