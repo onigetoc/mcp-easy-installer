@@ -31,6 +31,68 @@ export async function isNpmPackage(name: string) {
   }
 }
 
+
+export type ProjectType = 'nodejs' | 'python-pyproject' | 'python-requirements' | 'unknown';
+
+/**
+ * Detect the type of project in a directory
+ */
+export async function detectProjectType(directory: string): Promise<ProjectType> {
+  console.log(`[DEBUG] Detecting project type in ${directory}`);
+  try {
+    await fsAccess(path.join(directory, 'package.json'));
+    console.log('[DEBUG] Detected Node.js project (package.json found)');
+    return 'nodejs';
+  } catch (e) { /* ignore */ }
+
+  try {
+    await fsAccess(path.join(directory, 'pyproject.toml'));
+    console.log('[DEBUG] Detected Python project (pyproject.toml found)');
+    return 'python-pyproject';
+  } catch (e) { /* ignore */ }
+
+  try {
+    await fsAccess(path.join(directory, 'requirements.txt'));
+    console.log('[DEBUG] Detected Python project (requirements.txt found)');
+    return 'python-requirements';
+  } catch (e) { /* ignore */ }
+
+  console.log('[DEBUG] Could not determine project type');
+  return 'unknown';
+}
+
+/**
+ * Install Python dependencies using uv
+ */
+export async function installPythonDependencies(directory: string, projectType: 'python-pyproject' | 'python-requirements'): Promise<void> {
+  console.log(`[DEBUG] Installing Python dependencies in ${directory} using ${projectType}`);
+  if (!(await hasUvx())) {
+    throw new Error('Python installation requires `uv` to be installed. Please install it from https://docs.astral.sh/uv');
+  }
+
+  try {
+    const uvCmd = 'uv'; // Assuming uv is in PATH
+    let args: string[];
+
+    if (projectType === 'python-pyproject') {
+      args = ['sync'];
+      console.log('[DEBUG] Executing: uv sync');
+    } else { // python-requirements
+      args = ['pip', 'install', '-r', 'requirements.txt'];
+      console.log('[DEBUG] Executing: uv pip install -r requirements.txt');
+    }
+
+    await spawnPromise(uvCmd, args, { cwd: directory });
+    console.log('[DEBUG] Python dependencies installed successfully');
+
+  } catch (error) {
+    console.error('[DEBUG] Error during Python dependency installation:', error);
+    // It might be okay if dependencies fail (e.g., optional ones), but log prominently.
+    // Depending on strictness, you might want to re-throw the error.
+    throw new Error(`Failed to install Python dependencies: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 /**
  * Parse modelcontextprotocol repository URL to get server name
  * Example input: https://github.com/modelcontextprotocol/servers/tree/main/src/brave-search
@@ -257,7 +319,7 @@ export async function cloneRepository(cloneUrl: string, targetDir: string): Prom
 /**
  * Install dependencies using npm
  */
-export async function installDependencies(directory: string): Promise<void> {
+export async function installNodeDependencies(directory: string): Promise<void> {
   console.log(`[DEBUG] Installing dependencies in ${directory}`);
   try {
     // Initial install with --ignore-scripts to avoid prepare/postinstall issues
@@ -297,7 +359,7 @@ interface PackageJson {
 /**
  * Build the project using npm build script
  */
-export async function buildProject(directory: string, packageJson: PackageJson | null): Promise<void> {
+export async function buildNodeProject(directory: string, packageJson: PackageJson | null): Promise<void> {
   console.log(`[DEBUG] Building project in ${directory}`);
   if (packageJson?.scripts?.build) {
     console.log('[DEBUG] Found build script, executing: npm run build');
