@@ -146,6 +146,8 @@ Configure your MCP servers in your settings file (The Github token is optional t
 }
 ```
 
+Get your personal [GitHub Token](https://github.com/settings/tokens) then click Generate new token (You may have to login or create a Githhub account before).
+
 ---
 
 ## Platform Testing
