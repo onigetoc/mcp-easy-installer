@@ -17,6 +17,7 @@ import { rm, readFile } from 'fs/promises';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { glob } from 'glob';
 import * as toml from '@iarna/toml';
+import { updateAllClientConfigs } from './multi-client-config.js';
 
 interface PackageJson {
   name: string;
@@ -154,7 +155,8 @@ export async function installMcpServer(repoUrl: string): Promise<InstallResult> 
         await buildNodeProject(installDir, packageJson);
 
         // Clean up node_modules after build
-        await rm(path.join(installDir, 'node_modules'), { recursive: true }).catch(() => {});
+        // Commented out for now to avoid removing node_modules because some mcp server needs it to run and work
+        // await rm(path.join(installDir, 'node_modules'), { recursive: true }).catch(() => {});
 
         // Find entry point
         if (packageJson.bin) {
@@ -251,46 +253,92 @@ export async function installMcpServer(repoUrl: string): Promise<InstallResult> 
       }
     }
 
-    // Extract environment variables from README
+    // Extract environment variables and MCP JSON from README
     const readmeParser = new ReadmeParser();
     const readmeContent = await readmeParser.readLocalReadme(installDir);
     let envVars = null;
+    let mcpJsonResult = null;
 
     if (readmeContent) {
       envVars = readmeParser.extractEnvFromReadme(readmeContent);
+      mcpJsonResult = readmeParser.extractPythonMcpJsonAndInstall(readmeContent);
       if (envVars) {
         console.log('[DEBUG] Found environment variables:', Object.keys(envVars).join(', '));
       }
     }
 
     // Update MCP config
-    const mcpConfig: McpConfig = existsSync(configPath)
+    let mcpConfig: McpConfig = existsSync(configPath)
       ? JSON.parse(readFileSync(configPath, 'utf8'))
       : { mcpServers: {} };
 
-    mcpConfig.mcpServers[repoName] = {
-      command,
-      args,
-      enabled: true,
-      disabled: false,
-      autoApprove: [],
-      ...(envVars && { env: envVars })
-    };
+    // For Python: if README MCP JSON exists, use it
+    if (
+      (projectType === 'python-pyproject' || projectType === 'python-requirements') &&
+      mcpJsonResult && mcpJsonResult.mcpJson && mcpJsonResult.mcpJson.mcpServers
+    ) {
+      // Merge all servers from README MCP JSON into config
+      for (const [srv, srvConfig] of Object.entries(mcpJsonResult.mcpJson.mcpServers)) {
+        mcpConfig.mcpServers[srv] = srvConfig as ServerConfig;
+      }
+      writeFileSync(configPath, JSON.stringify(mcpConfig, null, 2));
+      console.log('[DEBUG] MCP configuration updated from README MCP JSON');
+      // Return the first server in the JSON as the result
+      const firstSrv = Object.keys(mcpJsonResult.mcpJson.mcpServers)[0];
+      const firstConfig = mcpJsonResult.mcpJson.mcpServers[firstSrv];
+      return {
+        serverName: firstSrv,
+        command: firstConfig.command,
+        args: firstConfig.args,
+        type: projectType,
+        fullPath: installDir
+      };
+    } else {
+      // Default: use detected command/args
+      mcpConfig.mcpServers[repoName] = {
+        command,
+        args,
+        enabled: true,
+        disabled: false,
+        autoApprove: [],
+        ...(envVars && { env: envVars })
+      };
 
-    writeFileSync(configPath, JSON.stringify(mcpConfig, null, 2));
-    console.log('[DEBUG] MCP configuration updated successfully');
+      writeFileSync(configPath, JSON.stringify(mcpConfig, null, 2));
+      console.log('[DEBUG] MCP configuration updated successfully');
+// Update all client configs except base
+updateAllClientConfigs(repoName, {
+  command,
+  args,
+  enabled: true,
+  disabled: false,
+  autoApprove: [],
+  ...(envVars && { env: envVars })
+});
 
-    return {
-      serverName: repoName,
-      command,
-      args,
-      type: projectType === 'unknown' ? 'nodejs' : projectType, // Default to nodejs if unknown
-      fullPath: installDir,
-      ...(envVars && { env: envVars })
-    };
+      return {
+        serverName: repoName,
+        command,
+        args,
+        type: projectType === 'unknown' ? 'nodejs' : projectType, // Default to nodejs if unknown
+        fullPath: installDir,
+        ...(envVars && { env: envVars })
+      };
+    }
 
   } catch (error) {
     console.error('[DEBUG] Installation failed:', error);
     throw error;
   }
 }
+
+// Example usage for extracting Python MCP JSON from a README:
+// const parser = new ReadmeParser();
+// const readmeContent = await parser.readLocalReadme('/path/to/dir');
+// const result = parser.extractPythonMcpJsonAndInstall(readmeContent);
+// if (result) {
+//   console.log('Extracted MCP JSON:', result.mcpJson);
+//   console.log('pip install command:', result.pipInstall);
+//   console.log('Repo URL:', result.repoUrl);
+// }
+

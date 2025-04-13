@@ -171,4 +171,48 @@ export class ReadmeParser {
     console.log('[DEBUG] No README file found in the directory.');
     return '';
   }
+
+  /**
+   * Extracts the first valid MCP server JSON (with "mcpServers") from a README, skipping Docker blocks.
+   * Also extracts the first pip install command and the repo URL if present.
+   * Returns { mcpJson: object, pipInstall: string|null, repoUrl: string|null }
+   */
+  extractPythonMcpJsonAndInstall(readmeContent: string): { mcpJson: any, pipInstall: string|null, repoUrl: string|null } | null {
+    if (!readmeContent) return null;
+    // Remove Docker code blocks
+    const noDocker = readmeContent.replace(/```[\s\S]*?docker[\s\S]*?```/gi, '');
+    // Find all JSON code blocks
+    const jsonBlocks = [...noDocker.matchAll(/```json\s*([\s\S]*?)```/gi)];
+    let mcpJson = null;
+    for (const block of jsonBlocks) {
+      try {
+        const parsed = JSON.parse(block[1]);
+        if (parsed && typeof parsed === 'object' && parsed.mcpServers) {
+          mcpJson = parsed;
+          break;
+        }
+      } catch {}
+    }
+    // Fallback: look for any { "mcpServers": ... } outside code blocks
+    if (!mcpJson) {
+      const mcpMatch = noDocker.match(/({[\s\S]*?"mcpServers"[\s\S]*?})/);
+      if (mcpMatch) {
+        try {
+          const parsed = JSON.parse(mcpMatch[1]);
+          if (parsed && parsed.mcpServers) mcpJson = parsed;
+        } catch {}
+      }
+    }
+    // Find first pip install command
+    const pipMatch = noDocker.match(/pip install ([^\s]+)/);
+    const pipInstall = pipMatch ? pipMatch[0] : null;
+    // Find GitHub repo URL
+    const repoMatch = noDocker.match(/https?:\/\/[\w\.-]+\/[^\s)"']+/);
+    const repoUrl = repoMatch ? repoMatch[0] : null;
+    if (mcpJson) {
+      return { mcpJson, pipInstall, repoUrl };
+    }
+    return null;
+  }
+
 }

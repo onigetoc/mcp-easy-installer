@@ -2,6 +2,7 @@ import { rm, readdir, stat } from 'fs/promises';
 import { readFileSync, writeFileSync } from 'fs';
 import * as path from 'path';
 import { ensureFlowvibeMcpStructure } from './utils.js';
+import { removeFromAllClientConfigs } from './multi-client-config.js';
 import { spawnPromise } from 'spawn-rx';
 
 export async function uninstallServer(serverName: string, mcpBasePath: string): Promise<string> {
@@ -101,6 +102,11 @@ export async function uninstallServer(serverName: string, mcpBasePath: string): 
   } catch (error) {
     console.log('[DEBUG] Error updating config:', error);
     configUpdateMsg = 'Error updating MCP configuration.';
+
+// Remove from all client configs except base
+// Remove from all client configs except base
+removeFromAllClientConfigs(serverName);
+removeFromAllClientConfigs(serverName);
   }
 
   // Try to remove directory, but do not block config update if it fails

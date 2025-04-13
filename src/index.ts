@@ -15,6 +15,7 @@
 // For Python servers, it handles uv installation and virtual environments
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { searchGithubRepos } from './search.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   CallToolRequestSchema,
@@ -29,7 +30,8 @@ import { uninstallServer } from './uninstall-manager.js';
 // Initialize MCP server
 const server = new Server(
   {
-    name: "mcp-install-repair-tool",
+    name: "mcp-easy-installer",
+    description: "MCP server installer and uninstaller. Use with MCP Client Claude or Flowvibe or CLI. Use with npm start install <repo-url> or uninstall <server-name>.",
     version: "1.0.0",
   },
   {
@@ -54,6 +56,20 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           },
         },
         required: ['repo_url'],
+      },
+    },
+    {
+      name: "search_mcp_server",
+      description: "Search for MCP servers on GitHub. Uses GITHUB_TOKEN from server config.",
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: 'Search query for GitHub repositories (e.g. "mcp-server", "language:typescript mcp")',
+          },
+        },
+        required: ['query'],
       },
     },
     {
@@ -135,6 +151,61 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      case 'search_mcp_server': {
+        const { query } = request.params.arguments || {};
+        if (!query) {
+          throw new McpError(ErrorCode.InvalidRequest, 'Missing search query');
+        }
+
+        // Get token from environment
+        const github_token = process.env.GITHUB_TOKEN;
+        if (!github_token) {
+          throw new McpError(ErrorCode.InvalidRequest, 'GitHub token not found in environment. Please set GITHUB_TOKEN in your MCP server config.');
+        }
+
+        try {
+          if (typeof query !== 'string') {
+            throw new McpError(ErrorCode.InvalidRequest, 'Search query must be a string');
+          }
+
+          const results = await searchGithubRepos(query, github_token);
+          
+          // Format the results for display
+          const formattedResults = results.map(repo => ({
+            title: repo.name,
+            description: repo.description || 'No description available',
+            url: repo.html_url,
+            language: repo.language || 'Unknown',
+            stars: repo.stargazers_count,
+            forks: repo.forks_count
+          }));
+
+          return {
+            content: [{
+              type: "text",
+              text: [
+                `Found ${results.length} repositories:`,
+                "",
+                ...formattedResults.map(repo => [
+                  `Repository: ${repo.title}`,
+                  `Description: ${repo.description}`,
+                  `Language: ${repo.language}`,
+                  `Stars: ${repo.stars}`,
+                  `Forks: ${repo.forks}`,
+                  `URL: ${repo.url}`,
+                  ""
+                ].join('\n'))
+              ].join('\n')
+            }]
+          };
+        } catch (error) {
+          throw new McpError(
+            ErrorCode.InvalidRequest,
+            `GitHub search failed: ${error instanceof Error ? error.message : String(error)}`
+          );
+        }
+      }
+
       default:
         throw new McpError(
           ErrorCode.MethodNotFound,
@@ -157,6 +228,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 if (process.argv.length > 2) {
   const command = process.argv[2];
   const { basePath } = ensureFlowvibeMcpStructure();
+  const githubToken = process.env.GITHUB_TOKEN;
 
   if (command === 'install' && process.argv[3]) {
     installMcpServer(process.argv[3])
@@ -185,6 +257,35 @@ if (process.argv.length > 2) {
         console.error(`Error: ${error.message}`);
         process.exit(1);
       });
+  } else if (command === 'search' && process.argv[3]) {
+    // For CLI mode, try to get token from environment
+    if (!githubToken) {
+      console.error('Error: GITHUB_TOKEN not found in environment');
+      console.error('Please add it to your MCP server config in mcp_configs.json:');
+      console.error('"env": {');
+      console.error('  "GITHUB_TOKEN": "your_github_token"');
+      console.error('}');
+      process.exit(1);
+    }
+    
+    searchGithubRepos(process.argv[3], githubToken || '')
+      .then(results => {
+        console.log('\nSearch Results:\n');
+        results.forEach(repo => {
+          console.log(`Repository: ${repo.name}`);
+          console.log(`Description: ${repo.description || 'No description'}`);
+          console.log(`Language: ${repo.language || 'Unknown'}`);
+          console.log(`Stars: ${repo.stargazers_count}`);
+          console.log(`Forks: ${repo.forks_count}`);
+          console.log(`URL: ${repo.html_url}`);
+          console.log('-------------------\n');
+        });
+        process.exit(0);
+      })
+      .catch(error => {
+        console.error(`Error: ${error.message}`);
+        process.exit(1);
+      });
   } else if (command === 'uninstall' && process.argv[3]) {
     uninstallServer(process.argv[3], basePath)
       .then(result => {
@@ -197,8 +298,12 @@ if (process.argv.length > 2) {
       });
   } else {
     console.log('Usage:');
-    console.log('  npm start install <repo-url>     Install new MCP server');
+    console.log('  npm start install <repo-url>      Install new MCP server');
     console.log('  npm start uninstall <server-name> Uninstall MCP server');
+    console.log('  npm start search <query>          Search for MCP servers on GitHub');
+    console.log('\nFor search, set GITHUB_TOKEN environment variable first:');
+    console.log('  set GITHUB_TOKEN=your_token      (on Windows)');
+    console.log('  export GITHUB_TOKEN=your_token   (on Unix)');
     process.exit(1);
   }
 } else {

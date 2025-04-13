@@ -1,7 +1,7 @@
 {
-  "name": "mcp-install-repair-tool",
+  "name": "mcp-easy-installer",
   "version": "1.0.0",
-  "description": "A tool to install & repair MCP servers",
+  "description": "A tool to install, uninstall, update, and repair MCP servers",
   "main": "build/index.js",
   "type": "module",
   "scripts": {
@@ -20,6 +20,7 @@
   "dependencies": {
     "@iarna/toml": "^2.2.5",
     "@modelcontextprotocol/sdk": "^0.6.0",
+    "@octokit/rest": "^21.1.1",
     "glob": "^10.3.10",
     "spawn-rx": "^5.1.2",
     "tar": "^6.2.1",
