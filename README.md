@@ -128,15 +128,19 @@ npm run build
 
 Configure your MCP servers in your settings file (The Github token is optional to search mcp server: Prevents rate limiting):
 
+By default, the tool searches for repositories in TypeScript (ts), JavaScript (js), and HTML. You can customize this or add other languages (like Python 'py' or Shell 'sh') using the `--langcode` argument. For example, to search also for Python and Shell repositories, you would add `"--langcode=ts,js,html,py,sh"` to the `args` list below. For the easiest setup, it's recommended to omit the `--langcode` argument to use the defaults.
+
 
 ```json
 {
   "mcpServers": {
     "mcp-easy-installer": {
       "command": "node",
-      "args": ["path-to\\mcp-easy-installer\\build\\index.js"],
+      "args": [
+        "path-to\\mcp-easy-installer\\build\\index.js"
+      ],
       "env": {
-        "GITHUB_TOKEN": "your_github_token" 
+        "GITHUB_TOKEN": "your_github_token"
       },
       "enable": true,
       "disabled": false,
@@ -144,6 +148,17 @@ Configure your MCP servers in your settings file (The Github token is optional t
     }
   }
 }
+```
+
+### Example: Configuration with all supported languages
+
+If you want to customize the languages used for searching, here's an example of the `args` array that includes all supported language codes:
+
+```json
+"args": [
+  "path-to\\mcp-easy-installer\\build\\index.js",
+  "--langcode=ts,js,html,py,sh"
+]
 ```
 
 Get your personal [GitHub Token](https://github.com/settings/tokens) then click Generate new token (You may have to login or create a Githhub account before).
