@@ -174,22 +174,25 @@ We need feedback from Mac and Linux users to ensure compatibility across all pla
 
 Your feedback is invaluable in making this tool work seamlessly across all operating systems.
 
----
+## Optimized MCP Server Usage with LLMs
+
+Through extensive testing with various MCP servers, we've discovered an optimal approach for LLMs to interact with MCP servers, even for smaller models using Function calls. Here's the recommended context to add to your MCP client for better results:
+
+```text
+Every time you use a MCP server, you must give the complete information. If, for example, you are asked to do a search on anything (YouTube, Wikipedia, Internet, BRAVE, etc.), you must give as much information as possible on the title, description and links. The links are very important in the answer because it can be used later in the conversation, for further interactions with the MCP Client or others MCP server.
+
+At the beginning of each answer but only if it's a complex question, make a bullet list to summarize what you are going to do between 5 and 10 points of what you will do next.
+
+After your answer, if it's a complex question, always write a resume and a plan to follow at the end of the answer.
+
+Use MCP server tools to go deeper when it's a structured work to do according the the complexity of the task.
+
+For example, if the user asks something very simple like, hello, how are you? You don't have to do deep research and just answer normally, without task, without going deeper. Just answer directly.
+```
+
+For a complete example of this implementation, see this [Github Gist](https://gist.github.com/onigetoc/d600d49ef5fbcc8d2942662e703a9dd6).
 
 [![Follow @intelixai_com](https://img.shields.io/twitter/follow/intelixai_com?style=social)](https://twitter.com/intelixai_com)
-
----
-
-## Example MCP Server Bin Paths
-
-- **Windows:**
-  ```
-  C:\Users\USERNAME\Documents\Flowvibe\MCP\server-fileserver\dist\index.js
-  ```
-- **Linux/Mac:**
-  ```
-  /home/USERNAME/Documents\Flowvibe\MCP/server-fileserver/dist/index.js
-  ```
 
 ---
 
