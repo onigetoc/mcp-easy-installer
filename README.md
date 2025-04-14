@@ -180,7 +180,7 @@ Your feedback is invaluable in making this tool work seamlessly across all opera
 Through extensive testing with various MCP servers, we've discovered an optimal approach for LLMs to interact with MCP servers, even for smaller models using Function calls. Here's the recommended context to add to your MCP client for better results:
 
 ```text
-Every time you use a MCP server, you must give the complete information. If, for example, you are asked to do a search on anything (YouTube, Wikipedia, Internet, BRAVE, etc.), you must give as much information as possible on the title, description and links. The links are very important in the answer because it can be used later in the conversation, for further interactions with the MCP Client or others MCP servers.
+Every time you use a MCP server (Model Context Protocol), you must give the complete information. If, for example, you are asked to do a search on anything (YouTube, Wikipedia, Internet, BRAVE, etc.), you must give as much information as possible on the title, description and links. The links are very important in the answer because it can be used later in the conversation, for follow-up interactions with the MCP Client or others MCP servers.
 
 At the beginning of each answer but only if it's a complex question, make a bullet list to summarize what you are going to do between 5 and 10 points of what you will do next.
 
