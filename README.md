@@ -149,6 +149,7 @@ Would you like to see GitHub search built in? Please share your thoughts and use
 You can use natural language commands like:
 
 - `Search for the fetch mcp server. (follow up prompt: install the third one)` May work with Brave or any others search tools with the Github or npmjs link.
+- `Search Github mcp server "wikipedia server"`
 - `Install this mcp server: https://www.npmjs.com/package/@modelcontextprotocol/server-brave-search` (NPMjs or Github repo url) or use Install <package>
 - `Install this mcp server tavily-ai/tavily-mcp` Install <package>
 - `Install mcp server with a Brave Github link search result.`
@@ -179,7 +180,7 @@ Your feedback is invaluable in making this tool work seamlessly across all opera
 Through extensive testing with various MCP servers, we've discovered an optimal approach for LLMs to interact with MCP servers, even for smaller models using Function calls. Here's the recommended context to add to your MCP client for better results:
 
 ```text
-Every time you use a MCP server, you must give the complete information. If, for example, you are asked to do a search on anything (YouTube, Wikipedia, Internet, BRAVE, etc.), you must give as much information as possible on the title, description and links. The links are very important in the answer because it can be used later in the conversation, for further interactions with the MCP Client or others MCP server.
+Every time you use a MCP server, you must give the complete information. If, for example, you are asked to do a search on anything (YouTube, Wikipedia, Internet, BRAVE, etc.), you must give as much information as possible on the title, description and links. The links are very important in the answer because it can be used later in the conversation, for further interactions with the MCP Client or others MCP servers.
 
 At the beginning of each answer but only if it's a complex question, make a bullet list to summarize what you are going to do between 5 and 10 points of what you will do next.
 
