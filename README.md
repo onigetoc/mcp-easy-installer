@@ -187,7 +187,7 @@ After your answer, if it's a complex question, always write a resume and a plan 
 
 Use MCP server tools to go deeper when it's a structured work to do according the the complexity of the task.
 
-For example, if the user asks something very simple like, hello, how are you? You don't have to do deep research and just answer normally, without task, without going deeper. Just answer directly.
+For example, if the user asks something very simple like, "hello, how are you?" You don't have to do deep research and just answer normally, without task, without going deeper. Just answer directly.
 ```
 
 For a complete example of this implementation, see this [Github Gist](https://gist.github.com/onigetoc/d600d49ef5fbcc8d2942662e703a9dd6).
