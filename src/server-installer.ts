@@ -17,7 +17,8 @@ import { rm, readFile } from 'fs/promises';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { glob } from 'glob';
 import * as toml from '@iarna/toml';
-import { updateAllClientConfigs } from './multi-client-config.js';
+import { updateAllClientConfigs, ServerConfig } from './multi-client-config.js';
+import { debugLog } from './logger.js';
 
 interface PackageJson {
   name: string;
@@ -43,15 +44,6 @@ interface PyProjectToml {
   };
 }
 
-type ServerConfig = {
-  command: string;
-  args: string[];
-  enabled: boolean;
-  disabled: boolean;
-  autoApprove: string[];
-  env?: { [key: string]: string };
-};
-
 type McpConfig = {
   mcpServers: {
     [key: string]: ServerConfig;
@@ -74,7 +66,7 @@ export type InstallResult = {
 export async function installMcpServer(repoUrl: string): Promise<InstallResult> {
   // Get MCP paths
   const { basePath, configPath } = ensureFlowvibeMcpStructure();
-  console.log(`[DEBUG] Starting installation for repository: ${repoUrl}`);
+  debugLog(`Starting installation for repository: ${repoUrl}`);
 
   // Check dependencies
   const hasNode = await hasNodeJs();
@@ -103,13 +95,13 @@ export async function installMcpServer(repoUrl: string): Promise<InstallResult> 
     if (existsSync(installDir)) {
       try {
         await rm(installDir, { recursive: true, force: true });
-        console.log(`[DEBUG] Removed existing directory: ${installDir}`);
+        debugLog(`Removed existing directory: ${installDir}`);
       } catch (error) {
         const alreadyMsg =
           `The MCP server "${repoName}" is already installed.\n` +
           `If you have any issues, you can try the repair command.\n` +
           `To remove it, use the uninstall command.`;
-        console.log(alreadyMsg);
+        debugLog(alreadyMsg);
         return {
           status: "already_installed",
           type: null,
@@ -125,17 +117,17 @@ export async function installMcpServer(repoUrl: string): Promise<InstallResult> 
 
     // Download/clone repository
     if (repoUrl.includes('modelcontextprotocol') || repoUrl.includes('npmjs.com')) {
-      console.log(`[DEBUG] Downloading npm package to: ${installDir}`);
+      debugLog(`Downloading npm package to: ${installDir}`);
       await downloadAndExtractNpmPackage(repoUrl, installDir);
     } else {
-      console.log(`[DEBUG] Cloning repository to: ${installDir}`);
+      debugLog(`Cloning repository to: ${installDir}`);
       const { cloneUrl } = parseGithubUrl(repoUrl);
       await cloneRepository(cloneUrl, installDir);
     }
 
     // Detect project type
     const projectType = await detectProjectType(installDir);
-    console.log(`[DEBUG] Detected project type: ${projectType}`);
+    debugLog(`Detected project type: ${projectType}`);
 
     // Handle installation based on project type
     let entryPoint: string | null = null;
@@ -263,7 +255,7 @@ export async function installMcpServer(repoUrl: string): Promise<InstallResult> 
       envVars = readmeParser.extractEnvFromReadme(readmeContent);
       mcpJsonResult = readmeParser.extractPythonMcpJsonAndInstall(readmeContent);
       if (envVars) {
-        console.log('[DEBUG] Found environment variables:', Object.keys(envVars).join(', '));
+        debugLog('Found environment variables: ' + Object.keys(envVars).join(', '));
       }
     }
 
@@ -282,7 +274,7 @@ export async function installMcpServer(repoUrl: string): Promise<InstallResult> 
         mcpConfig.mcpServers[srv] = srvConfig as ServerConfig;
       }
       writeFileSync(configPath, JSON.stringify(mcpConfig, null, 2));
-      console.log('[DEBUG] MCP configuration updated from README MCP JSON');
+      debugLog('MCP configuration updated from README MCP JSON');
       // Return the first server in the JSON as the result
       const firstSrv = Object.keys(mcpJsonResult.mcpJson.mcpServers)[0];
       const firstConfig = mcpJsonResult.mcpJson.mcpServers[firstSrv];
@@ -295,26 +287,18 @@ export async function installMcpServer(repoUrl: string): Promise<InstallResult> 
       };
     } else {
       // Default: use detected command/args
-      mcpConfig.mcpServers[repoName] = {
+      const serverConfig: ServerConfig = {
         command,
         args,
-        enabled: true,
-        disabled: false,
-        autoApprove: [],
         ...(envVars && { env: envVars })
       };
 
+      mcpConfig.mcpServers[repoName] = serverConfig;
       writeFileSync(configPath, JSON.stringify(mcpConfig, null, 2));
-      console.log('[DEBUG] MCP configuration updated successfully');
-// Update all client configs except base
-updateAllClientConfigs(repoName, {
-  command,
-  args,
-  enabled: true,
-  disabled: false,
-  autoApprove: [],
-  ...(envVars && { env: envVars })
-});
+      debugLog('MCP configuration updated successfully');
+
+      // Update all client configs except base
+      updateAllClientConfigs(repoName, serverConfig);
 
       return {
         serverName: repoName,
@@ -327,18 +311,7 @@ updateAllClientConfigs(repoName, {
     }
 
   } catch (error) {
-    console.error('[DEBUG] Installation failed:', error);
+    debugLog(`Installation failed: ${error instanceof Error ? error.message : String(error)}`);
     throw error;
   }
 }
-
-// Example usage for extracting Python MCP JSON from a README:
-// const parser = new ReadmeParser();
-// const readmeContent = await parser.readLocalReadme('/path/to/dir');
-// const result = parser.extractPythonMcpJsonAndInstall(readmeContent);
-// if (result) {
-//   console.log('Extracted MCP JSON:', result.mcpJson);
-//   console.log('pip install command:', result.pipInstall);
-//   console.log('Repo URL:', result.repoUrl);
-// }
-

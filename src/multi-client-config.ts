@@ -2,13 +2,11 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { debugLog } from './logger.js';
 
 export type ServerConfig = {
   command: string;
   args: string[];
-  enabled: boolean;
-  disabled: boolean;
-  autoApprove: string[];
   env?: { [key: string]: string };
 };
 
@@ -22,6 +20,7 @@ const homedir = os.homedir();
 
 export const clientConfigs: Record<string, string> = {
   flowvibeOnedrive: path.join(homedir, 'OneDrive', 'Documents', 'Flowvibe', 'MCP', 'mcp_configs.json'),
+  dive: path.join(homedir, 'AppData', 'Roaming', 'dive', 'Config', 'config.json'),
   flowvibe: path.join(homedir, 'Documents', 'Flowvibe', 'MCP', 'mcp_configs.json'),
   claude: path.join(homedir, 'AppData', 'Roaming', 'Claude', 'claude_desktop_config.json'),
   cursor: path.join(homedir, '.cursor', 'mcp.json'),
@@ -48,36 +47,59 @@ function isBaseConfig(configPath: string): boolean {
 
 // Update all client configs (install)
 export function updateAllClientConfigs(serverName: string, serverConfig: ServerConfig) {
+  debugLog('Updating all client configs...');
   Object.entries(clientConfigs).forEach(([client, configPath]) => {
-    if (isBaseConfig(configPath)) return; // skip base config
+    if (isBaseConfig(configPath)) {
+      debugLog(`Skipping base config: ${configPath}`);
+      return;
+    }
     try {
-      if (!fs.existsSync(configPath)) return;
+      if (!fs.existsSync(configPath)) {
+        debugLog(`Config file not found: ${configPath}`);
+        return;
+      }
+      debugLog(`Updating config: ${configPath}`);
       const raw = fs.readFileSync(configPath, 'utf8');
       const config: McpConfig = JSON.parse(raw);
       if (!config.mcpServers) config.mcpServers = {};
       config.mcpServers[serverName] = serverConfig;
       fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-    } catch (e) {
-      // skip on error, best-effort
+      debugLog(`Successfully updated ${client} config with server: ${serverName}`);
+    } catch (error) {
+      debugLog(`Error updating ${client} config: ${error instanceof Error ? error.message : String(error)}`);
     }
   });
 }
 
 // Remove server from all client configs (uninstall)
 export function removeFromAllClientConfigs(serverName: string) {
+  debugLog(`Removing server "${serverName}" from all client configs...`);
   Object.entries(clientConfigs).forEach(([client, configPath]) => {
-    if (isBaseConfig(configPath)) return; // skip base config
+    if (isBaseConfig(configPath)) {
+      debugLog(`Skipping base config: ${configPath}`);
+      return;
+    }
     try {
-      if (!fs.existsSync(configPath)) return;
+      if (!fs.existsSync(configPath)) {
+        debugLog(`Config file not found: ${configPath}`);
+        return;
+      }
+      debugLog(`Processing config: ${configPath}`);
       const raw = fs.readFileSync(configPath, 'utf8');
       const config: McpConfig = JSON.parse(raw);
-      if (!config.mcpServers) return;
+      if (!config.mcpServers) {
+        debugLog(`No mcpServers in config: ${configPath}`);
+        return;
+      }
       if (config.mcpServers[serverName]) {
         delete config.mcpServers[serverName];
         fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+        debugLog(`Successfully removed ${serverName} from ${client} config`);
+      } else {
+        debugLog(`Server ${serverName} not found in ${client} config`);
       }
-    } catch (e) {
-      // skip on error, best-effort
+    } catch (error) {
+      debugLog(`Error removing server from ${client} config: ${error instanceof Error ? error.message : String(error)}`);
     }
   });
 }

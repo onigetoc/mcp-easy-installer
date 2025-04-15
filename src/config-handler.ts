@@ -1,5 +1,6 @@
 import * as path from 'path';
 import { readFileSync, writeFileSync } from 'fs';
+import { debugLog } from './logger.js';
 
 export class ConfigHandler {
   constructor(private readonly mcpConfigPath: string) {}
@@ -8,7 +9,7 @@ export class ConfigHandler {
    * Update MCP configuration file with new server entry
    */
   updateMcpConfig(serverName: string, config: any): void {
-    console.log(`[DEBUG] Updating MCP config at: ${this.mcpConfigPath}`);
+    debugLog(`Updating MCP config at: ${this.mcpConfigPath}`);
 
     try {
       // Read existing config or create new one
@@ -16,10 +17,10 @@ export class ConfigHandler {
       try {
         const existingConfig = readFileSync(this.mcpConfigPath, 'utf8');
         fullConfig = JSON.parse(existingConfig);
-        console.log('[DEBUG] Successfully read existing config');
+        debugLog('Successfully read existing config');
       } catch (error: any) {
         if (error.code === 'ENOENT') {
-          console.log('[DEBUG] No existing config found, creating new one');
+          debugLog('No existing config found, creating new one');
           fullConfig = { mcpServers: {} };
         } else {
           throw error;
@@ -42,10 +43,7 @@ export class ConfigHandler {
       // Add server config
       const serverConfig: any = {
         command: config.command,
-        args: formattedArgs,
-        enabled: true,
-        disabled: false,
-        autoApprove: []
+        args: formattedArgs
       };
 
       // Add env if present
@@ -67,17 +65,17 @@ export class ConfigHandler {
       // Write to file synchronously
       writeFileSync(this.mcpConfigPath, jsonString, 'utf8');
 
-      console.log('[DEBUG] Successfully updated config file');
-      console.log('[DEBUG] Added/Updated server config:', JSON.stringify(serverConfig, null, 2));
+      debugLog('Successfully updated config file');
+      debugLog(`Added/Updated server config: ${JSON.stringify(serverConfig, null, 2)}`);
 
     } catch (error) {
-      console.error('[DEBUG] Failed to update config:', error);
+      debugLog(`Failed to update config: ${error instanceof Error ? error.message : String(error)}`);
       throw new Error(`Failed to update MCP config: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
   generateNodeMcpConfig(jsFilePath: string, serverName: string, env?: { [key: string]: string } | null): string {
-    console.log(`[DEBUG] Generating Node.js MCP config for ${serverName}`);
+    debugLog(`Generating Node.js MCP config for ${serverName}`);
     const formattedPath = process.platform === 'win32'
       ? jsFilePath.replace(/\\/g, '\\\\')
       : jsFilePath;
@@ -85,15 +83,12 @@ export class ConfigHandler {
     const serverConfig: any = {
       command: "node",
       args: [formattedPath],
-      enabled: true,
-      disabled: false,
-      autoApprove: [],
     };
 
     if (env && typeof env === 'object' && Object.keys(env).length > 0) {
-      console.log('[DEBUG] Found environment variables in README:');
+      debugLog('Found environment variables in README:');
       Object.entries(env).forEach(([key, value]) => {
-        console.log(`[DEBUG]   ${key} = ${value}`);
+        debugLog(`  ${key} = ${value}`);
       });
       serverConfig.env = env;
     }
@@ -109,12 +104,12 @@ export class ConfigHandler {
       return value;
     }, 2);
 
-    console.log(`[DEBUG] Generated Node.js config:\n${jsonString}`);
+    debugLog(`Generated Node.js config:\n${jsonString}`);
     return jsonString;
   }
 
   generatePythonMcpConfig(scriptPath: string, serverName: string, env?: { [key: string]: string } | null): string {
-    console.log(`[DEBUG] Generating Python MCP config for ${serverName}`);
+    debugLog(`Generating Python MCP config for ${serverName}`);
     const formattedPath = process.platform === 'win32'
       ? scriptPath.replace(/\\/g, '\\\\')
       : scriptPath;
@@ -122,15 +117,12 @@ export class ConfigHandler {
     const serverConfig: any = {
       command: "uv",
       args: ["run", formattedPath],
-      enabled: true,
-      disabled: false,
-      autoApprove: [],
     };
 
     if (env && typeof env === 'object' && Object.keys(env).length > 0) {
-      console.log('[DEBUG] Found environment variables in README:');
+      debugLog('Found environment variables in README:');
       Object.entries(env).forEach(([key, value]) => {
-        console.log(`[DEBUG]   ${key} = ${value}`);
+        debugLog(`  ${key} = ${value}`);
       });
       serverConfig.env = env;
     }
@@ -146,7 +138,7 @@ export class ConfigHandler {
       return value;
     }, 2);
 
-    console.log(`[DEBUG] Generated Python config:\n${jsonString}`);
+    debugLog(`Generated Python config:\n${jsonString}`);
     return jsonString;
   }
 }

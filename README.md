@@ -110,10 +110,7 @@ By default, the tool searches for repositories in TypeScript (ts), JavaScript (j
       ],
       "env": {
         "GITHUB_TOKEN": "your_github_token"
-      },
-      "enable": true,
-      "disabled": false,
-      "autoApprove": []
+      }
     }
   }
 }

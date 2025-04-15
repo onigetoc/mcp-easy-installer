@@ -121,9 +121,6 @@ export class ServerRepairHandler {
     const serverConfig = {
       command: "node",
       args: [mainJsFile],
-      enabled: true,
-      disabled: false,
-      autoApprove: [],
       ...(readmeEnv && { env: readmeEnv })
     };
     this.configHandler.updateMcpConfig(serverName, serverConfig);

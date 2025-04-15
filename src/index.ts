@@ -1,18 +1,19 @@
 #!/usr/bin/env node
 
-// test with env:
-// npm start install https://github.com/overstarry/qweather-mcp
-// Unistall: npm start uninstall server-brave-search
-// from npmjs.com: npm start install https://www.npmjs.com/package/@modelcontextprotocol/server-brave-search
-
-// npm start install https://github.com/Garoth/echo-mcp
-// python
-// npm start install https://github.com/Garoth/echo-mcp
+// Custom debug logger that doesn't interfere with MCP JSON output
+function debugLog(message: string) {
+  process.stderr.write(`DEBUG: ${message}\n`);
+}
 
 // Important: This tool fixes installation issues with MCP servers and handles uninstallation
 // It supports both Node.js and Python MCP servers
 // For Node.js servers, it manages dependencies, building, and configuration
 // For Python servers, it handles uv installation and virtual environments
+
+// Usage examples:
+// npm start install https://github.com/overstarry/qweather-mcp
+// npm start uninstall server-brave-search
+// npm start install https://www.npmjs.com/package/@modelcontextprotocol/server-brave-search
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { searchGithubRepos } from './search.js';
@@ -86,6 +87,25 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: ['server_name'],
       },
     }
+    ,
+    {
+      name: "repair_mcp_server",
+      description: "Repair an MCP server by uninstalling and reinstalling it. Requires the keyword to find the server and the original installation URL.",
+      inputSchema: {
+        type: 'object',
+        properties: {
+          server_keyword: {
+            type: 'string',
+            description: 'Keyword or name to find the server to repair (case-insensitive, partial match)',
+          },
+          repo_url: {
+            type: 'string',
+            description: 'The original GitHub URL or npm URL used to install the server',
+          },
+        },
+        required: ['server_keyword', 'repo_url'],
+      },
+    }
   ]
 }));
 
@@ -105,9 +125,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           [(result.serverName || "unknown")]: {
             command: result.command,
             args: result.args,
-            enabled: true,
-            disabled: false,
-            autoApprove: [],
             ...(result.env && { env: result.env })
           }
         };
@@ -205,6 +222,88 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           );
         }
       }
+      case 'repair_mcp_server': {
+        const serverKeyword = request.params.arguments?.server_keyword;
+        const repoUrl = request.params.arguments?.repo_url;
+
+        if (typeof serverKeyword !== 'string') {
+          throw new McpError(ErrorCode.InvalidRequest, 'Missing or invalid server_keyword');
+        }
+        if (typeof repoUrl !== 'string') {
+          throw new McpError(ErrorCode.InvalidRequest, 'Missing or invalid repo_url');
+        }
+
+        const { basePath } = ensureFlowvibeMcpStructure();
+        let uninstallResultText = '';
+        let installResultText = '';
+        let installResultData: Awaited<ReturnType<typeof installMcpServer>> | null = null;
+
+        // Step 1: Uninstall
+        try {
+          uninstallResultText = await uninstallServer(serverKeyword, basePath);
+          debugLog(`Repair: Uninstall step completed for keyword '${serverKeyword}'. Result: ${uninstallResultText}`);
+        } catch (uninstallError) {
+          uninstallResultText = `Uninstall failed for '${serverKeyword}': ${uninstallError instanceof Error ? uninstallError.message : String(uninstallError)}`;
+          debugLog(`Repair: Uninstall step failed for keyword '${serverKeyword}'. Error: ${uninstallError instanceof Error ? uninstallError.message : String(uninstallError)}`);
+          // Decide if we should stop or try to install anyway. Let's try to install.
+        }
+
+        // Step 2: Install
+        try {
+          installResultData = await installMcpServer(repoUrl);
+          // Only construct success message if installResultData is not null
+          if (installResultData) {
+            const serverConfig = {
+              [(installResultData.serverName || "unknown")]: {
+                command: installResultData.command,
+                args: installResultData.args,
+                ...(installResultData.env && { env: installResultData.env })
+              }
+            };
+            installResultText = [
+              `Reinstallation of ${installResultData.serverName} successful!`,
+              "",
+              "New server config:",
+              JSON.stringify(serverConfig, null, 2),
+              "",
+              "Installation Details:",
+              JSON.stringify({
+                server_name: installResultData.serverName,
+                command: installResultData.command,
+                startup_args: (installResultData.args || []).join(' '),
+                installation_path: installResultData.fullPath,
+                server_type: installResultData.type
+              }, null, 2)
+            ].join('\n');
+            debugLog(`Repair: Reinstall step completed for URL '${repoUrl}'.`);
+          } else {
+             // This case should ideally not happen if installMcpServer resolves without error but returns null/undefined
+             installResultText = `Reinstallation from '${repoUrl}' completed but returned no data.`;
+             debugLog(`Warning: Repair reinstall step for URL '${repoUrl}' returned no data.`);
+          }
+        } catch (installError) {
+          installResultText = `Reinstallation from '${repoUrl}' failed: ${installError instanceof Error ? installError.message : String(installError)}`;
+          debugLog(`Repair: Reinstall step failed for URL '${repoUrl}'. Error: ${installError instanceof Error ? installError.message : String(installError)}`);
+          installResultData = null; // Ensure it's null on error
+        }
+
+        // Combine results
+        const combinedResult = [
+          `Repair process for keyword '${serverKeyword}' using URL '${repoUrl}':`,
+          "--- Uninstall Phase ---",
+          uninstallResultText,
+          "--- Reinstall Phase ---",
+          installResultText
+        ].join('\n\n');
+
+        return {
+          content: [{
+            type: "text",
+            text: combinedResult
+          }]
+        };
+      }
+
 
       default:
         throw new McpError(
@@ -237,9 +336,6 @@ if (process.argv.length > 2) {
           [(result.serverName || "unknown")]: {
             command: result.command,
             args: result.args,
-            enabled: true,
-            disabled: false,
-            autoApprove: [],
             ...(result.env && { env: result.env })
           }
         };
@@ -249,68 +345,92 @@ if (process.argv.length > 2) {
           ? `\n\nEnvironment Variables:\n${JSON.stringify(result.env, null, 2)}`
           : '\n\nNo environment variables found in README.';
 
-        console.log(JSON.stringify(serverConfig, null, 2));
-        console.log(envMessage);
+        // Format output as proper JSON for MCP protocol
+        const output = {
+          config: serverConfig,
+          env_vars: result.env || null,
+          status: "success"
+        };
+        console.log(JSON.stringify(output));
         process.exit(0);
       })
       .catch(error => {
-        console.error(`Error: ${error.message}`);
+        // Format errors as proper JSON for MCP protocol
+        const errorOutput = {
+          error: error instanceof Error ? error.message : String(error),
+          status: "error"
+        };
+        console.log(JSON.stringify(errorOutput));
         process.exit(1);
       });
   } else if (command === 'search' && process.argv[3]) {
     // For CLI mode, try to get token from environment
     if (!githubToken) {
-      console.error('Error: GITHUB_TOKEN not found in environment');
-      console.error('Please add it to your MCP server config in mcp_configs.json:');
-      console.error('"env": {');
-      console.error('  "GITHUB_TOKEN": "your_github_token"');
-      console.error('}');
+      const errorOutput = {
+        error: "GITHUB_TOKEN not found in environment. Add to mcp_configs.json: { \"env\": { \"GITHUB_TOKEN\": \"your_token\" } }",
+        status: "error"
+      };
+      console.log(JSON.stringify(errorOutput));
       process.exit(1);
     }
     
     searchGithubRepos(process.argv[3], githubToken || '')
       .then(results => {
-        console.log('\nSearch Results:\n');
-        results.forEach(repo => {
-          console.log(`Repository: ${repo.name}`);
-          console.log(`Description: ${repo.description || 'No description'}`);
-          console.log(`Language: ${repo.language || 'Unknown'}`);
-          console.log(`Stars: ${repo.stargazers_count}`);
-          console.log(`Forks: ${repo.forks_count}`);
-          console.log(`URL: ${repo.html_url}`);
-          console.log('-------------------\n');
-        });
+        // Format search results as proper JSON for MCP protocol
+        const output = {
+          results: results.map(repo => ({
+            name: repo.name,
+            description: repo.description || 'No description',
+            language: repo.language || 'Unknown',
+            stars: repo.stargazers_count,
+            forks: repo.forks_count,
+            url: repo.html_url
+          })),
+          status: "success"
+        };
+        console.log(JSON.stringify(output));
         process.exit(0);
       })
       .catch(error => {
-        console.error(`Error: ${error.message}`);
+        const errorOutput = {
+          error: error instanceof Error ? error.message : String(error),
+          status: "error"
+        };
+        console.log(JSON.stringify(errorOutput));
         process.exit(1);
       });
   } else if (command === 'uninstall' && process.argv[3]) {
     uninstallServer(process.argv[3], basePath)
       .then(result => {
-        console.log(result);
+        console.log(JSON.stringify({ result, status: "success" }));
         process.exit(0);
       })
       .catch(error => {
-        console.error(`Error: ${error.message}`);
+        console.log(JSON.stringify({
+          error: error instanceof Error ? error.message : String(error),
+          status: "error"
+        }));
         process.exit(1);
       });
   } else {
-    console.log('Usage:');
-    console.log('  npm start install <repo-url>      Install new MCP server');
-    console.log('  npm start uninstall <server-name> Uninstall MCP server');
-    console.log('  npm start search <query>          Search for MCP servers on GitHub');
-    console.log('\nFor search, set GITHUB_TOKEN environment variable first:');
-    console.log('  set GITHUB_TOKEN=your_token      (on Windows)');
-    console.log('  export GITHUB_TOKEN=your_token   (on Unix)');
+    const usageOutput = {
+      error: "Invalid command",
+      usage: {
+        install: "npm start install <repo-url>      Install new MCP server",
+        uninstall: "npm start uninstall <server-name> Uninstall MCP server",
+        search: "npm start search <query>          Search for MCP servers on GitHub"
+      },
+      note: "For search, set GITHUB_TOKEN in mcp_configs.json",
+      status: "error"
+    };
+    console.log(JSON.stringify(usageOutput));
     process.exit(1);
   }
 } else {
   // MCP server mode
   const transport = new StdioServerTransport();
   server.connect(transport).catch(error => {
-    console.error('Failed to start server:', error);
+    debugLog(`Failed to start server: ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
   });
 }

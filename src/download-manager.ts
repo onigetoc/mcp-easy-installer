@@ -2,8 +2,10 @@ import { access as fsAccess, mkdir as fsMkdir, rm as fsRm, readdir as fsReaddir 
 import * as path from 'path';
 import { spawnPromise } from "spawn-rx";
 import * as tar from 'tar';
+import { debugLog } from './logger.js';
 
 // System verification utilities
+
 export async function hasNodeJs() {
   try {
     await spawnPromise("node", ["--version"]);
@@ -38,26 +40,26 @@ export type ProjectType = 'nodejs' | 'python-pyproject' | 'python-requirements' 
  * Detect the type of project in a directory
  */
 export async function detectProjectType(directory: string): Promise<ProjectType> {
-  console.log(`[DEBUG] Detecting project type in ${directory}`);
+  debugLog(`Detecting project type in ${directory}`);
   try {
     await fsAccess(path.join(directory, 'package.json'));
-    console.log('[DEBUG] Detected Node.js project (package.json found)');
+    debugLog('Detected Node.js project (package.json found)');
     return 'nodejs';
   } catch (e) { /* ignore */ }
 
   try {
     await fsAccess(path.join(directory, 'pyproject.toml'));
-    console.log('[DEBUG] Detected Python project (pyproject.toml found)');
+    debugLog('Detected Python project (pyproject.toml found)');
     return 'python-pyproject';
   } catch (e) { /* ignore */ }
 
   try {
     await fsAccess(path.join(directory, 'requirements.txt'));
-    console.log('[DEBUG] Detected Python project (requirements.txt found)');
+    debugLog('Detected Python project (requirements.txt found)');
     return 'python-requirements';
   } catch (e) { /* ignore */ }
 
-  console.log('[DEBUG] Could not determine project type');
+  debugLog('Could not determine project type');
   return 'unknown';
 }
 
@@ -65,7 +67,7 @@ export async function detectProjectType(directory: string): Promise<ProjectType>
  * Install Python dependencies using uv
  */
 export async function installPythonDependencies(directory: string, projectType: 'python-pyproject' | 'python-requirements'): Promise<void> {
-  console.log(`[DEBUG] Installing Python dependencies in ${directory} using ${projectType}`);
+  debugLog(`Installing Python dependencies in ${directory} using ${projectType}`);
   if (!(await hasUvx())) {
     throw new Error('Python installation requires `uv` to be installed. Please install it from https://docs.astral.sh/uv');
   }
@@ -76,17 +78,17 @@ export async function installPythonDependencies(directory: string, projectType: 
 
     if (projectType === 'python-pyproject') {
       args = ['sync'];
-      console.log('[DEBUG] Executing: uv sync');
+      debugLog('Executing: uv sync');
     } else { // python-requirements
       args = ['pip', 'install', '-r', 'requirements.txt'];
-      console.log('[DEBUG] Executing: uv pip install -r requirements.txt');
+      debugLog('Executing: uv pip install -r requirements.txt');
     }
 
     await spawnPromise(uvCmd, args, { cwd: directory });
-    console.log('[DEBUG] Python dependencies installed successfully');
+    debugLog('Python dependencies installed successfully');
 
   } catch (error) {
-    console.error('[DEBUG] Error during Python dependency installation:', error);
+    debugLog(`Error during Python dependency installation: ${error instanceof Error ? error.message : String(error)}`);
     // It might be okay if dependencies fail (e.g., optional ones), but log prominently.
     // Depending on strictness, you might want to re-throw the error.
     throw new Error(`Failed to install Python dependencies: ${error instanceof Error ? error.message : String(error)}`);
@@ -99,7 +101,7 @@ export async function installPythonDependencies(directory: string, projectType: 
  * Returns: brave-search
  */
 export function parseModelContextUrl(repoUrl: string): string {
-  console.log(`[DEBUG] Parsing modelcontextprotocol URL: ${repoUrl}`);
+  debugLog(`Parsing modelcontextprotocol URL: ${repoUrl}`);
   
   // Check if it's an npmjs.com URL
   if (repoUrl.includes('npmjs.com')) {
@@ -108,7 +110,7 @@ export function parseModelContextUrl(repoUrl: string): string {
     const match = repoUrl.match(/\/package\/@modelcontextprotocol\/server-([^\/]+)$/);
     if (match) {
       const serverName = match[1];
-      console.log(`[DEBUG] Extracted server name from npm URL: ${serverName}`);
+      debugLog(`Extracted server name from npm URL: ${serverName}`);
       return serverName;
     }
   }
@@ -118,7 +120,7 @@ export function parseModelContextUrl(repoUrl: string): string {
   const githubMatch = repoUrl.match(/\/src\/([^\/]+)(?:\/)?$/);
   if (githubMatch) {
     const serverName = githubMatch[1];
-    console.log(`[DEBUG] Extracted server name from GitHub URL: ${serverName}`);
+    debugLog(`Extracted server name from GitHub URL: ${serverName}`);
     return serverName;
   }
   
@@ -133,13 +135,13 @@ export function parseModelContextUrl(repoUrl: string): string {
  * Download and extract a modelcontextprotocol server using npm pack
  */
 export async function downloadAndExtractNpmPackage(repoUrl: string, targetDir: string): Promise<void> {
-  console.log(`[DEBUG] Downloading npm package for ${repoUrl} into ${targetDir}`);
+  debugLog(`Downloading npm package for ${repoUrl} into ${targetDir}`);
   
   try {
     // Extract server name from URL
     const serverName = parseModelContextUrl(repoUrl);
     const packageName = `@modelcontextprotocol/server-${serverName}`;
-    console.log(`[DEBUG] Using npm package name: ${packageName}`);
+    debugLog(`Using npm package name: ${packageName}`);
 
     // Create base directory if needed
     const baseDir = path.dirname(targetDir);
@@ -147,14 +149,14 @@ export async function downloadAndExtractNpmPackage(repoUrl: string, targetDir: s
 
     // Create temporary directory with a unique name
     const tempDir = path.join(baseDir, `.temp-${Date.now()}`);
-    console.log(`[DEBUG] Creating temporary directory: ${tempDir}`);
+    debugLog(`Creating temporary directory: ${tempDir}`);
     await fsMkdir(tempDir, { recursive: true, mode: 0o777 });
-    console.log(`[DEBUG] Temporary directory created`);
+    debugLog(`Temporary directory created`);
 
     try {
       // Run npm pack to download the package
       const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-      console.log(`[DEBUG] Running: npm pack ${packageName}`);
+      debugLog(`Running: npm pack ${packageName}`);
       await spawnPromise(npmCmd, ['pack', packageName], { cwd: tempDir });
 
       // Find the downloaded .tgz file
@@ -164,36 +166,36 @@ export async function downloadAndExtractNpmPackage(repoUrl: string, targetDir: s
         throw new Error('Could not find downloaded .tgz file');
       }
       if (tgzFiles.length > 1) {
-        console.warn('[DEBUG] Multiple .tgz files found, using the first one');
+        debugLog('Multiple .tgz files found, using the first one');
       }
       const tgzFile = tgzFiles[0];
 
       // Create target directory before extraction
-      console.log(`[DEBUG] Creating target directory: ${targetDir}`);
+      debugLog(`Creating target directory: ${targetDir}`);
       await fsMkdir(targetDir, { recursive: true });
 
       // Extract using Node's tar module
-      console.log(`[DEBUG] Extracting ${tgzFile} to ${targetDir}`);
+      debugLog(`Extracting ${tgzFile} to ${targetDir}`);
       try {
         await tar.x({
           file: path.join(tempDir, tgzFile),
           cwd: targetDir,
           strip: 1
         });
-        console.log('[DEBUG] Extraction complete');
+        debugLog('Extraction complete');
       } catch (extractError) {
-        console.error('[DEBUG] Tar extraction error:', extractError);
+        debugLog(`Tar extraction error: ${extractError instanceof Error ? extractError.message : String(extractError)}`);
         throw new Error(`Failed to extract package: ${extractError instanceof Error ? extractError.message : String(extractError)}`);
       }
 
     } finally {
       // Clean up temporary directory
       await fsRm(tempDir, { recursive: true, force: true });
-      console.log('[DEBUG] Cleaned up temporary directory');
+      debugLog('Cleaned up temporary directory');
     }
 
   } catch (error) {
-    console.error('[DEBUG] Error during npm package download:', error);
+    debugLog(`Error during npm package download: ${error instanceof Error ? error.message : String(error)}`);
     throw new Error(`Failed to download and extract npm package: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
@@ -202,7 +204,7 @@ export async function downloadAndExtractNpmPackage(repoUrl: string, targetDir: s
  * Parse GitHub URL or shorthand to get clone URL and repo name
  */
 export function parseGithubUrl(repoInput: string): { cloneUrl: string; repoName: string } {
-  console.log(`[DEBUG] Parsing GitHub input: ${repoInput}`);
+  debugLog(`Parsing GitHub input: ${repoInput}`);
   let cloneUrl = '';
   let repoName = '';
 
@@ -216,13 +218,13 @@ export function parseGithubUrl(repoInput: string): { cloneUrl: string; repoName:
   if (urlMatch) {
     repoName = urlMatch[1];
     cloneUrl = `https://github.com/${repoName}.git`;
-    console.log(`[DEBUG] Matched full URL. Repo: ${repoName}, Clone URL: ${cloneUrl}`);
+    debugLog(`Matched full URL. Repo: ${repoName}, Clone URL: ${cloneUrl}`);
   } else if (shorthandMatch) {
     repoName = shorthandMatch[1];
     cloneUrl = `https://github.com/${repoName}.git`;
-    console.log(`[DEBUG] Matched shorthand. Repo: ${repoName}, Clone URL: ${cloneUrl}`);
+    debugLog(`Matched shorthand. Repo: ${repoName}, Clone URL: ${cloneUrl}`);
   } else {
-    console.error('[DEBUG] Invalid GitHub URL or shorthand format');
+    debugLog('Invalid GitHub URL or shorthand format');
     throw new Error('Invalid GitHub URL or shorthand format. Use format like `owner/repo` or `https://github.com/owner/repo`.');
   }
 
@@ -237,7 +239,7 @@ export function parseGithubUrl(repoInput: string): { cloneUrl: string; repoName:
  * Clone a Git repository
  */
 export async function cloneRepository(cloneUrl: string, targetDir: string): Promise<void> {
-  console.log(`[DEBUG] Cloning repository ${cloneUrl} into ${targetDir}`);
+  debugLog(`Cloning repository ${cloneUrl} into ${targetDir}`);
   try {
     // Create base directory if needed
     const baseDir = path.dirname(targetDir);
@@ -250,7 +252,7 @@ export async function cloneRepository(cloneUrl: string, targetDir: string): Prom
         .catch(() => false);
 
       if (exists) {
-        console.log('[DEBUG] Found existing installation directory');
+        debugLog('Found existing installation directory');
 
         try {
           // Check if it's a valid installation or corrupted
@@ -264,16 +266,16 @@ export async function cloneRepository(cloneUrl: string, targetDir: string): Prom
               `To reinstall, first remove the existing directory manually.`
             );
           } else {
-            console.log('[DEBUG] Existing directory appears to be incomplete/corrupted, cleaning up...');
+            debugLog('Existing directory appears to be incomplete/corrupted, cleaning up...');
             await fsRm(targetDir, { recursive: true, force: true });
-            console.log('[DEBUG] Cleanup successful');
+            debugLog('Cleanup successful');
           }
         } catch (error: any) {
           if (error?.message?.includes('already exists')) {
             throw error; // Rethrow our custom error
           }
           // Other errors during cleanup - warn but continue
-          console.warn('[DEBUG] Warning during cleanup:', error?.message || String(error));
+          debugLog(`Warning during cleanup: ${error?.message || String(error)}`);
         }
       }
     } catch (error: any) {
@@ -290,14 +292,14 @@ export async function cloneRepository(cloneUrl: string, targetDir: string): Prom
 
     // Single attempt at cloning - we've already checked directory doesn't exist
     const command = `git clone ${cloneUrl} "${targetDir.replace(/\\/g, '\\\\')}"`;
-    console.log(`[DEBUG] Executing git clone: ${command}`);
+    debugLog(`Executing git clone: ${command}`);
 
     try {
       await spawnPromise("git", ["clone", cloneUrl, targetDir]);
-      console.log('[DEBUG] Git clone successful');
+      debugLog('Git clone successful');
     } catch (error: any) {
       const errorMessage = error?.message || String(error);
-      console.error('[DEBUG] Git clone failed:', errorMessage);
+      debugLog(`Git clone failed: ${errorMessage}`);
 
       // Provide more helpful error messages
       if (errorMessage.includes('already exists')) {
@@ -311,7 +313,7 @@ export async function cloneRepository(cloneUrl: string, targetDir: string): Prom
     }
 
   } catch (error) {
-    console.error('[DEBUG] Error during git clone:', error);
+    debugLog(`Error during git clone: ${error instanceof Error ? error.message : String(error)}`);
     throw new Error(`Failed to clone repository: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
@@ -320,31 +322,31 @@ export async function cloneRepository(cloneUrl: string, targetDir: string): Prom
  * Install dependencies using npm
  */
 export async function installNodeDependencies(directory: string): Promise<void> {
-  console.log(`[DEBUG] Installing dependencies in ${directory}`);
+  debugLog(`Installing dependencies in ${directory}`);
   try {
     // Initial install with --ignore-scripts to avoid prepare/postinstall issues
-    console.log('[DEBUG] Executing: npm install --ignore-scripts');
+    debugLog('Executing: npm install --ignore-scripts');
     const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-    console.log(`[DEBUG] Using npm command: ${npmCmd}`);
+    debugLog(`Using npm command: ${npmCmd}`);
     await spawnPromise(npmCmd, ['install', '--ignore-scripts'], { cwd: directory });
-    console.log('[DEBUG] Base npm install successful');
+    debugLog('Base npm install successful');
 
     // Install dev dependencies separately
     try {
-      console.log('[DEBUG] Installing dev dependencies...');
+      debugLog('Installing dev dependencies...');
       await spawnPromise(npmCmd, ['install', '--save-dev', 'typescript', '@types/node'], {
         cwd: directory,
         env: { ...process.env, npm_config_ignore_scripts: "true" }
       });
-      console.log('[DEBUG] Dev dependencies installed');
+      debugLog('Dev dependencies installed');
     } catch (devError) {
-      console.warn('[DEBUG] Dev dependencies installation failed:', devError);
+      debugLog(`Dev dependencies installation failed: ${devError instanceof Error ? devError.message : String(devError)}`);
       // Continue since dev dependencies might already be in the package
     }
   } catch (error) {
-    console.warn('[DEBUG] Error during dependency installation:', error);
+    debugLog(`Error during dependency installation: ${error instanceof Error ? error.message : String(error)}`);
     // Don't throw error - the package might already include built files
-    console.log('[DEBUG] Continuing despite dependency installation issues');
+    debugLog('Continuing despite dependency installation issues');
   }
 }
 
@@ -360,12 +362,12 @@ interface PackageJson {
  * Build the project using npm build script
  */
 export async function buildNodeProject(directory: string, packageJson: PackageJson | null): Promise<void> {
-  console.log(`[DEBUG] Building project in ${directory}`);
+  debugLog(`Building project in ${directory}`);
   if (packageJson?.scripts?.build) {
-    console.log('[DEBUG] Found build script, executing: npm run build');
+    debugLog('Found build script, executing: npm run build');
     try {
       const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-      console.log(`[DEBUG] Using npm command: ${npmCmd} for build`);
+      debugLog(`Using npm command: ${npmCmd} for build`);
       
       // On Windows, try to handle the shx chmod issue
       if (process.platform === 'win32') {
@@ -383,13 +385,13 @@ export async function buildNodeProject(directory: string, packageJson: PackageJs
         await spawnPromise(npmCmd, ['run', 'build'], { cwd: directory });
       }
       
-      console.log('[DEBUG] npm run build successful');
+      debugLog('npm run build successful');
     } catch (error) {
-      console.warn('[DEBUG] Build error:', error);
+      debugLog(`Build error: ${error instanceof Error ? error.message : String(error)}`);
       // Build errors are non-fatal - the package might already include built files
-      console.log('[DEBUG] Continuing despite build issues - will try to find existing JS files');
+      debugLog('Continuing despite build issues - will try to find existing JS files');
     }
   } else {
-    console.log('[DEBUG] No build script found in package.json, skipping build step.');
+    debugLog('No build script found in package.json, skipping build step.');
   }
 }
