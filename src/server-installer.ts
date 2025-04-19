@@ -129,6 +129,57 @@ export async function installMcpServer(repoUrl: string): Promise<InstallResult> 
     const projectType = await detectProjectType(installDir);
     debugLog(`Detected project type: ${projectType}`);
 
+    // --- Determine Official Server Name ---
+    let officialServerName = repoName; // Default to repoName as fallback
+    let foundOfficialName = false;
+    debugLog(`Attempting to determine official server name for directory: ${installDir}`);
+
+    // Attempt 1: Read package.json (Primarily for Node.js)
+    if (projectType === 'nodejs') { // Only try package.json for node projects initially
+      const packageJsonPath = path.join(installDir, 'package.json');
+      try {
+        // package.json should exist if type is nodejs, read directly
+        const packageJsonContent = readFileSync(packageJsonPath, 'utf8');
+        const packageJson = JSON.parse(packageJsonContent) as PackageJson;
+        if (typeof packageJson.name === 'string' && packageJson.name) {
+          officialServerName = packageJson.name;
+          foundOfficialName = true;
+          debugLog(`Found official server name "${officialServerName}" from ${packageJsonPath}`);
+        } else {
+          debugLog(`Found ${packageJsonPath}, but "name" field is missing or invalid.`);
+        }
+      } catch (pkgError) {
+        debugLog(`Could not read or parse ${packageJsonPath}: ${pkgError instanceof Error ? pkgError.message : String(pkgError)}`);
+      }
+    }
+
+    // Attempt 2: Read README.md (Fallback for all types if package.json didn't yield a name)
+    if (!foundOfficialName) {
+      debugLog('Attempting to find official name from README.md as fallback');
+      const readmeParser = new ReadmeParser(); // Use existing parser instance logic if available or create new
+      const readmeContent = await readmeParser.readLocalReadme(installDir); // Assumes this handles finding README.md variations
+
+      if (readmeContent) {
+         // Try to parse the name from the "mcpServers": { "NAME": { ... } } pattern
+         // Use a more robust regex to handle potential whitespace variations
+         const match = readmeContent.match(/"mcpServers"\s*:\s*{\s*"([^"]+)"\s*:\s*{/);
+         if (match && match[1]) {
+           officialServerName = match[1];
+           foundOfficialName = true;
+           debugLog(`Found official server name "${officialServerName}" from README.md`);
+         } else {
+           debugLog(`Found README.md, but could not extract name from "mcpServers" JSON example.`);
+         }
+      } else {
+         debugLog(`No README.md found or readable in ${installDir}.`);
+      }
+    }
+
+    if (!foundOfficialName) {
+       debugLog(`Could not determine official server name from package.json or README.md. Falling back to repository name: "${officialServerName}"`);
+    }
+    // --- End Determine Official Server Name ---
+
     // Handle installation based on project type
     let entryPoint: string | null = null;
     let command = '';
@@ -293,15 +344,15 @@ export async function installMcpServer(repoUrl: string): Promise<InstallResult> 
         ...(envVars && { env: envVars })
       };
 
-      mcpConfig.mcpServers[repoName] = serverConfig;
+      mcpConfig.mcpServers[officialServerName] = serverConfig; // Use official name
       writeFileSync(configPath, JSON.stringify(mcpConfig, null, 2));
-      debugLog('MCP configuration updated successfully');
+      debugLog(`MCP configuration updated successfully with key: ${officialServerName}`);
 
       // Update all client configs except base
-      updateAllClientConfigs(repoName, serverConfig);
+      updateAllClientConfigs(officialServerName, serverConfig); // Use official name
 
       return {
-        serverName: repoName,
+        serverName: officialServerName, // Use official name
         command,
         args,
         type: projectType === 'unknown' ? 'nodejs' : projectType, // Default to nodejs if unknown

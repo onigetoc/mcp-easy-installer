@@ -4,9 +4,12 @@
   "description": "A tool to install, uninstall, update, and repair MCP servers",
   "main": "build/index.js",
   "type": "module",
+  "bin": {
+    "mcp-easy-installer": "./build/index.js"
+  },
   "scripts": {
-    "build": "tsc",
     "start": "node build/index.js",
+    "build": "tsc",
     "test": "node -e \"const os=require('os'),path=require('path'),fs=require('fs');const testDir=path.join(os.homedir(),'OneDrive','Documents','Flowvibe','MCP','qweather-mcp');fs.existsSync(testDir)&&fs.rmSync(testDir,{recursive:true,force:true});\" && npm run build && npm start install https://github.com/overstarry/qweather-mcp"
   },
   "keywords": [

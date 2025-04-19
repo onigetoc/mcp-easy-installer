@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+#!/usr/bin/env node
+
 // Custom debug logger that doesn't interfere with MCP JSON output
 function debugLog(message: string) {
   process.stderr.write(`DEBUG: ${message}\n`);

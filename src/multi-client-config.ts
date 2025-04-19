@@ -72,8 +72,9 @@ export function updateAllClientConfigs(serverName: string, serverConfig: ServerC
 }
 
 // Remove server from all client configs (uninstall)
-export function removeFromAllClientConfigs(serverName: string) {
-  debugLog(`Removing server "${serverName}" from all client configs...`);
+export function removeFromAllClientConfigs(officialServerName: string) {
+  // Note: officialServerName is expected to be the exact name from package.json
+  debugLog(`Removing server with official name "${officialServerName}" from all client configs...`);
   Object.entries(clientConfigs).forEach(([client, configPath]) => {
     if (isBaseConfig(configPath)) {
       debugLog(`Skipping base config: ${configPath}`);
@@ -91,12 +92,14 @@ export function removeFromAllClientConfigs(serverName: string) {
         debugLog(`No mcpServers in config: ${configPath}`);
         return;
       }
-      if (config.mcpServers[serverName]) {
-        delete config.mcpServers[serverName];
+      // Use exact match with the official server name
+      if (config.mcpServers[officialServerName]) {
+        debugLog(`Removing config entry: ${officialServerName} from ${client}`);
+        delete config.mcpServers[officialServerName];
         fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-        debugLog(`Successfully removed ${serverName} from ${client} config`);
+        debugLog(`Successfully removed ${officialServerName} from ${client} config`);
       } else {
-        debugLog(`Server ${serverName} not found in ${client} config`);
+        debugLog(`Server ${officialServerName} not found in ${client} config`);
       }
     } catch (error) {
       debugLog(`Error removing server from ${client} config: ${error instanceof Error ? error.message : String(error)}`);
