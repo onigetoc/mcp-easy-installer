@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { debugLog } from '../utils/logger.js';
-import { McpConfigSchema, type ServerConfig, type McpConfig } from '../types/schemas.js';
+import { type ServerConfig } from '../types/schemas.js';
 
 const homedir = os.homedir();
 
@@ -51,10 +51,13 @@ export function updateAllClientConfigs(serverName: string, serverConfig: ServerC
       }
       debugLog(`Updating config: ${configPath}`);
       const raw = fs.readFileSync(configPath, 'utf8');
-      const config = McpConfigSchema.parse(JSON.parse(raw));
-      if (!config.mcpServers) config.mcpServers = {};
-      config.mcpServers[serverName] = serverConfig;
-      fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+      const parsed = JSON.parse(raw);
+      // Use loose parsing: just ensure mcpServers object exists, don't validate existing entries
+      if (!parsed.mcpServers || typeof parsed.mcpServers !== 'object') {
+        parsed.mcpServers = {};
+      }
+      parsed.mcpServers[serverName] = serverConfig;
+      fs.writeFileSync(configPath, JSON.stringify(parsed, null, 2));
       debugLog(`Successfully updated ${client} config with server: ${serverName}`);
     } catch (error) {
       debugLog(`Error updating ${client} config: ${error instanceof Error ? error.message : String(error)}`);
@@ -78,24 +81,24 @@ export function removeFromAllClientConfigs(officialServerName: string) {
       }
       debugLog(`Processing config: ${configPath}`);
       const raw = fs.readFileSync(configPath, 'utf8');
-      const config = McpConfigSchema.parse(JSON.parse(raw));
-      if (!config.mcpServers) {
+      const parsed = JSON.parse(raw);
+      if (!parsed.mcpServers || typeof parsed.mcpServers !== 'object') {
         debugLog(`No mcpServers in config: ${configPath}`);
         return;
       }
       // Find and remove any server with matching name (case insensitive)
       const searchName = officialServerName.toLowerCase();
       let found = false;
-      Object.keys(config.mcpServers).forEach(serverName => {
+      Object.keys(parsed.mcpServers).forEach(serverName => {
         if (serverName.toLowerCase() === searchName) {
           debugLog(`Removing config entry: ${serverName} from ${client}`);
-          delete config.mcpServers[serverName];
+          delete parsed.mcpServers[serverName];
           found = true;
         }
       });
 
       if (found) {
-        fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+        fs.writeFileSync(configPath, JSON.stringify(parsed, null, 2));
         debugLog(`Successfully removed ${officialServerName} from ${client} config`);
       } else {
         debugLog(`Server ${officialServerName} not found in ${client} config`);
