@@ -1,0 +1,35 @@
+{
+  "name": "mcp-easy-installer",
+  "author": "Onigetoc",
+  "version": "1.0.0",
+  "description": "A tool to install, uninstall, update, and repair MCP servers",
+  "main": "./build/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node build/index.js",
+    "build": "tsc",
+    "test": "node -e \"const os=require('os'),path=require('path'),fs=require('fs');const testDir=path.join(os.homedir(),'OneDrive','Documents','Flowvibe','MCP','qweather-mcp');fs.existsSync(testDir)&&fs.rmSync(testDir,{recursive:true,force:true});\" && npm run build && npm start install https://github.com/overstarry/qweather-mcp",
+    "test-tools": "npm run build && node test-tools.js"
+  },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "repair",
+    "typescript"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@iarna/toml": "^2.2.5",
+    "@modelcontextprotocol/sdk": "^0.6.0",
+    "@octokit/rest": "^21.1.1",
+    "glob": "^10.3.10",
+    "spawn-rx": "^5.1.2",
+    "tar": "^7.5.22",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/glob": "^8.1.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}

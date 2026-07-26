@@ -1,0 +1,16 @@
+# Exclude everything by default
+*
+
+# Whitelist only what we want to track
+!.gitignore
+!src/
+!src/**
+!package.json
+!tsconfig.json
+!README.md
+
+# Always ignore these even if matched by whitelist
+node_modules/
+build/
+dist/
+*.log
