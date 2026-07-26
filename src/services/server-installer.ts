@@ -175,7 +175,7 @@ export async function installMcpServer(repoUrl: string): Promise<InstallResult> 
 
         // Method 1: Try package.json start script
         if (packageJson.scripts?.start) {
-          const startScript = packageJson.scripts.start;
+          const startScript = packageJson.scripts.start as string;
           const scriptMatch = startScript.match(/node\s+(.+\.js)/);
           if (scriptMatch) {
             let startPath = scriptMatch[1];
@@ -200,7 +200,7 @@ export async function installMcpServer(repoUrl: string): Promise<InstallResult> 
             const matchingEntry = binEntries.find(([key]) =>
               key === packageJson.name || key.endsWith('-server')
             );
-            binPath = matchingEntry ? matchingEntry[1] : binEntries[0]?.[1] ?? '';
+            binPath = matchingEntry ? matchingEntry[1] as string : (binEntries[0]?.[1] as string) ?? '';
           }
           if (binPath) {
             for (const dir of outputDirs) {
@@ -299,7 +299,7 @@ export async function installMcpServer(repoUrl: string): Promise<InstallResult> 
           const allScripts = { ...projectScripts, ...poetryScripts };
           
           if (Object.keys(allScripts).length > 0) {
-            entryPoint = Object.values(allScripts)[0];
+            entryPoint = Object.values(allScripts)[0] as string;
           }
         }
 
